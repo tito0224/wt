@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/johnlotito/wt/internal/config"
 	"github.com/johnlotito/wt/internal/git"
 	"github.com/johnlotito/wt/internal/launcher"
@@ -41,9 +39,9 @@ func newRootCmd() *cobra.Command {
 }
 
 func runInteractive() error {
-	dir := repoDir()
-	if !git.IsRepo(dir) {
-		return fmt.Errorf("%s is not a git repository", dir)
+	dir, err := requireRepo()
+	if err != nil {
+		return err
 	}
 	// Resolve launcher settings from config. Best-effort: an unreadable config
 	// just means defaults.

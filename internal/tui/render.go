@@ -111,23 +111,34 @@ func (m *model) computeLayout() layout {
 	return l
 }
 
-// footer renders the shared status/help line. While a git operation is in
-// flight, the spinner + label replace the usual message/help line.
-func (m *model) footer(help string) string {
-	var b strings.Builder
+// messageLine renders the transient status portion of a footer: the spinner +
+// label while a git operation is in flight, otherwise the ✓/✗ message when one
+// is set. Returns "" when there is nothing to show. Shared by footer
+// (create/launch screens) and keyBarFooter (list/detail) so the two footers
+// can't drift apart visually.
+func (m *model) messageLine() string {
 	if m.spinner.active {
-		b.WriteString(m.spinner.model.View() + " " + helpStyle.Render(m.spinner.msg))
-		return b.String()
+		return m.spinner.model.View() + " " + helpStyle.Render(m.spinner.msg)
 	}
 	if m.message != "" {
 		if m.isErr {
-			b.WriteString(errorStyle.Render("✗ "+m.message) + "\n")
-		} else {
-			b.WriteString(cleanStyle.Render("✓ "+m.message) + "\n")
+			return errorStyle.Render("✗ " + m.message)
 		}
+		return cleanStyle.Render("✓ " + m.message)
 	}
-	b.WriteString(helpStyle.Render(help))
-	return b.String()
+	return ""
+}
+
+// footer renders the shared status/help line. While a git operation is in
+// flight, the spinner + label replace the usual message/help line.
+func (m *model) footer(help string) string {
+	if m.spinner.active {
+		return m.messageLine()
+	}
+	if ml := m.messageLine(); ml != "" {
+		return ml + "\n" + helpStyle.Render(help)
+	}
+	return helpStyle.Render(help)
 }
 
 // renderRow renders one table row. The selected row is drawn as plain text

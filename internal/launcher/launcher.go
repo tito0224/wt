@@ -10,10 +10,9 @@ package launcher
 
 import (
 	"fmt"
-	"os"
-	"sort"
-	"strings"
 
+	"github.com/johnlotito/wt/internal/browser"
+	"github.com/johnlotito/wt/internal/registry"
 	"github.com/johnlotito/wt/internal/terminal"
 )
 
@@ -57,58 +56,28 @@ type Launcher interface {
 	URL(dir string) string
 }
 
-var registry = map[string]Launcher{}
+var launchers = registry.New[Launcher]("launcher", "launcher")
 
 // Register adds a launcher to the global registry. Intended for use from
 // init(). Panics on duplicate names to catch programming errors early.
-func Register(l Launcher) {
-	if _, dup := registry[l.Name()]; dup {
-		panic("launcher: duplicate launcher " + l.Name())
-	}
-	registry[l.Name()] = l
-}
+func Register(l Launcher) { launchers.Register(l.Name(), l) }
 
 // Names returns the sorted list of registered launcher names.
-func Names() []string {
-	names := make([]string, 0, len(registry))
-	for n := range registry {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
-}
+func Names() []string { return launchers.Names() }
 
 // Get returns the launcher registered under name.
-func Get(name string) (Launcher, bool) {
-	l, ok := registry[name]
-	return l, ok
-}
+func Get(name string) (Launcher, bool) { return launchers.Get(name) }
 
 // Available returns the registered launchers that are installed, in sorted
 // (deterministic) name order.
 func Available() []Launcher {
 	var out []Launcher
-	for _, name := range Names() {
-		if l := registry[name]; l.Available() {
+	for _, l := range launchers.Values() {
+		if l.Available() {
 			out = append(out, l)
 		}
 	}
 	return out
-}
-
-// Resolve selects a launcher by name. If name is empty it prefers the
-// WT_LAUNCHER env var. It errors when the chosen launcher is unknown.
-func Resolve(name string) (Launcher, error) {
-	if name == "" {
-		name = os.Getenv("WT_LAUNCHER")
-	}
-	if name == "" {
-		return nil, fmt.Errorf("no launcher specified (available: %s)", strings.Join(Names(), ", "))
-	}
-	if l, ok := registry[name]; ok {
-		return l, nil
-	}
-	return nil, fmt.Errorf("unknown launcher %q (available: %s)", name, strings.Join(Names(), ", "))
 }
 
 // Launch runs the launcher for dir. GUI and URL launchers run directly; a
@@ -119,7 +88,7 @@ func Launch(l Launcher, dir string, term terminal.Adapter) error {
 	case KindGUI:
 		return l.GUILaunch(dir)
 	case KindURL:
-		return openURL(l.URL(dir))
+		return browser.Open(l.URL(dir))
 	case KindTerminal:
 		if term == nil {
 			return fmt.Errorf("%s needs a terminal but none is available", l.Title())

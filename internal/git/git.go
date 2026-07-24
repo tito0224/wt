@@ -164,24 +164,14 @@ func parseCommit(rec string) (Commit, bool) {
 	}, true
 }
 
-// LastCommit returns details of the commit at HEAD in dir.
-func LastCommit(dir string) (Commit, error) {
-	out, err := run(dir, "log", "-1", "--no-color", "--format="+commitFormat)
-	if err != nil {
-		return Commit{}, err
-	}
-	c, ok := parseCommit(out)
-	if !ok {
-		return Commit{}, fmt.Errorf("unexpected git log output")
-	}
-	return c, nil
-}
-
-// FileChange describes one changed path from `git status --porcelain`.
+// FileChange describes one changed path from `git status --porcelain -z`.
 type FileChange struct {
 	// Code is the two-character XY status (e.g. " M", "A ", "??"), where X is
 	// the staged (index) state and Y the unstaged (worktree) state.
 	Code string
+	// Path is the affected path, exactly as git reported it (never C-quoted,
+	// thanks to -z). For rename/copy entries it is rendered as
+	// "original -> new" for display.
 	Path string
 }
 
@@ -196,24 +186,42 @@ type WorktreeStatus struct {
 // Clean reports whether there are no changes at all.
 func (s WorktreeStatus) Clean() bool { return len(s.Files) == 0 }
 
-// Status parses `git status --porcelain` for dir into per-category counts and
-// the list of changed files (in git's order).
+// Status parses `git status --porcelain -z` for dir into per-category counts
+// and the list of changed files (in git's order).
+//
+// The -z (NUL-separated) form is used because it is unambiguous: paths are
+// never C-quoted (without -z, git quotes paths containing spaces or non-ASCII
+// characters unless core.quotepath=off), and rename/copy entries carry the
+// original path as a separate NUL-terminated field instead of an in-line
+// " -> " arrow that a path could legally contain.
 func Status(dir string) (WorktreeStatus, error) {
 	// Use runRaw: the leading space in a status code (e.g. " M") is significant
-	// and must not be trimmed away from the first line.
-	out, err := runRaw(dir, "status", "--porcelain")
+	// and must not be trimmed away from the first entry.
+	out, err := runRaw(dir, "status", "--porcelain", "-z")
 	if err != nil {
 		return WorktreeStatus{}, err
 	}
 	var s WorktreeStatus
-	for _, line := range strings.Split(out, "\n") {
-		if len(line) < 4 {
+	fields := strings.Split(out, "\x00")
+	for i := 0; i < len(fields); i++ {
+		entry := fields[i]
+		// Each entry is "XY <path>": two status bytes, a separator space, and
+		// a path of at least one byte. The trailing NUL makes the final Split
+		// field empty; skip it (and anything else too short to be valid).
+		if len(entry) < 4 {
 			continue
 		}
-		// Porcelain v1: "XY <path>" — X (index) and Y (worktree) status, a
-		// separator space, then the path starting at column 3.
-		code := line[:2]
-		path := line[3:]
+		code := entry[:2]
+		path := entry[3:]
+		// Rename/copy entries (X or Y is R or C) are followed by ONE extra
+		// NUL-terminated field holding the ORIGINAL path (-z emits the new
+		// path first, then the original). Consume it here so it is never
+		// misread as an independent entry, and render the pair as
+		// "orig -> new" for display.
+		if strings.ContainsAny(code, "RC") && i+1 < len(fields) {
+			i++
+			path = fields[i] + " -> " + path
+		}
 		s.Files = append(s.Files, FileChange{Code: code, Path: path})
 
 		switch {
@@ -542,10 +550,4 @@ func ensureParent(path string) error {
 		}
 	}
 	return nil
-}
-
-// Prune removes worktree administrative files for missing worktrees.
-func Prune(dir string) error {
-	_, err := run(dir, "worktree", "prune")
-	return err
 }

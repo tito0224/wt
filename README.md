@@ -45,6 +45,9 @@ wt shell install            # detects your shell from $SHELL
 wt shell install --shell zsh --dry-run   # preview without writing
 ```
 
+For bash, the installer writes to `~/.bash_profile` on macOS (where bash runs
+as a login shell) and to `~/.bashrc` elsewhere.
+
 Restart your shell afterwards.
 
 ## Usage
@@ -70,7 +73,13 @@ Use `-C <dir>` to run as if started in another directory.
 ### Creation defaults (config)
 
 `wt add` reads defaults for the base branch, target directory, and branch
-naming. Configuration is layered, later sources overriding earlier ones:
+naming. The branch name and the on-disk location follow different rules: the
+branch keeps its full name, slashes and all (e.g. `jl/foo`), while the
+worktree directory is always a single flat folder derived from the name with
+slashes replaced by `-` (branch `feat/x` lives in `.../feat-x`, never a
+nested `feat/x/`).
+
+Configuration is layered, later sources overriding earlier ones:
 
 1. built-in defaults
 2. global file: `$XDG_CONFIG_HOME/wt/config.toml` (falls back to
@@ -93,7 +102,8 @@ Example `config.toml` (or repo-local `.wt.toml`):
 base_branch = ""
 
 # Where worktrees are placed. Relative paths resolve against the repo root.
-# Supports the {repo} placeholder. The worktree name is appended.
+# Supports the {repo} placeholder. The worktree name is appended as a
+# single flat directory (slashes in the name become '-').
 # Default: "../<repo>-worktrees"
 dir = "../{repo}-worktrees"
 
@@ -103,7 +113,8 @@ branch_separator = "/"
 ```
 
 Environment equivalents: `WT_BASE_BRANCH`, `WT_DIR`, `WT_BRANCH_PREFIX`,
-`WT_BRANCH_SEPARATOR`.
+`WT_BRANCH_SEPARATOR`, `WT_LAUNCHER` (maps to `launch.default`), and
+`WT_OPENCODE_WEB_URL` (maps to `launch.opencode_web_url`).
 
 ### Interactive keys
 
@@ -120,6 +131,7 @@ Normal mode:
 | `E` | choose an editor / agent to open |
 | `tab` / `→` / `l` | open the details screen |
 | `r` | remove (`y` worktree · `b` worktree + branch · `n` cancel) |
+| `R` | refresh the worktree list and statuses |
 | `/` | search / filter |
 | `?` | full key reference |
 | `q` / `esc` | quit (`esc` first clears an active filter) |
@@ -133,7 +145,8 @@ native order (repo root first).
 As you move the highlight, a status bar shows the selected worktree's last
 commit (hash, relative date, author, subject) and, when the `gh` CLI is
 installed and the repo is on GitHub, its pull request (number, state, URL).
-These load in the background and are cached for the session.
+These load in the background and are cached for the session; press `R` to
+refresh the list and statuses.
 
 The add screen (`a`) lets you create a worktree for a new branch or an existing
 one: type a name to filter the list of local branches shown below the input.
@@ -146,6 +159,14 @@ worktree are shown dimmed and can't be selected.
 The terminal adapter is auto-detected from `$TERM_PROGRAM` / `$TMUX`. Override
 with `--terminal <name>` or the `WT_TERMINAL` env var. See `wt terminals`.
 
+### Platform support
+
+The primary target is macOS: the iTerm2, Terminal.app, and Ghostty adapters
+use macOS mechanisms (AppleScript / `open`). The tmux and WezTerm adapters
+work cross-platform. On Linux, URLs are opened via `xdg-open`. There is
+currently no Windows terminal adapter. Editor/agent launchers are detected
+via `PATH` and, on macOS, app bundles.
+
 ## Adding a terminal adapter
 
 Implement `terminal.Adapter` and register it in an `init()`:
@@ -153,9 +174,15 @@ Implement `terminal.Adapter` and register it in an `init()`:
 ```go
 type myterm struct{}
 
-func (myterm) Name() string        { return "myterm" }
-func (myterm) Detect() bool        { return os.Getenv("TERM_PROGRAM") == "MyTerm" }
-func (myterm) OpenTab(dir string) error { /* spawn a tab in dir */ }
+func (myterm) Name() string { return "myterm" }
+func (myterm) Detect() bool { return os.Getenv("TERM_PROGRAM") == "MyTerm" }
+
+// OpenTab spawns a tab in dir. When command is non-empty, the tab runs that
+// argv (command[0] with command[1:] as args) instead of an interactive shell.
+func (myterm) OpenTab(dir string, command ...string) error {
+	// spawn a tab in dir, running command if given
+	return nil
+}
 
 func init() { terminal.Register(myterm{}) }
 ```

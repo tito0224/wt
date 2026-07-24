@@ -7,7 +7,8 @@
 base_branch = "{{ .Create.BaseBranch }}"
 
 # Where worktrees are placed. Relative paths resolve against the repo
-# root. Supports the {repo} placeholder. The worktree name is appended.
+# root. Supports the {repo} placeholder. The worktree name is appended as a
+# single flat directory (slashes in the name become '-').
 # Empty = "../<repo>-worktrees".
 dir = "{{ .Create.Dir }}"
 
@@ -18,11 +19,13 @@ branch_separator = "{{ .Create.BranchSeparator }}"
 [launch]
 # Default editor/agent opened by the quick-launch key (e). One of the
 # launcher names shown by the picker (e.g. "code", "cursor", "zed",
-# "claude", "opencode"). Empty = the first available one.
+# "claude", "opencode"). Empty = launch the single available one if
+# exactly one is installed, otherwise open the launcher picker.
 default = "{{ .Launch.Default }}"
 
 # Origin of an already-running `opencode web` server (e.g.
 # "http://localhost:4096"). When set, the "opencode-web" launcher opens a deep
 # link into that server for the worktree instead of starting a new one. Also
-# honored via the OPENCODE_WEB_ORIGIN environment variable.
+# honored via the OPENCODE_WEB_ORIGIN environment variable; wt's own
+# WT_OPENCODE_WEB_URL environment variable overrides this key too.
 opencode_web_url = "{{ .Launch.OpencodeWebURL }}"

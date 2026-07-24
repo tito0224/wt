@@ -9,7 +9,8 @@ package forge
 
 import (
 	"errors"
-	"sort"
+
+	"github.com/johnlotito/wt/internal/registry"
 )
 
 // ErrNoPR is returned by Adapter.PR / LookupPR when the lookup succeeded but
@@ -48,32 +49,20 @@ type Adapter interface {
 	PR(dir, branch string) (*PR, error)
 }
 
-var registry = map[string]Adapter{}
+var adapters = registry.New[Adapter]("forge", "adapter")
 
 // Register adds an adapter to the global registry. Intended for use from
 // init(). Panics on duplicate names to catch programming errors early.
-func Register(a Adapter) {
-	if _, dup := registry[a.Name()]; dup {
-		panic("forge: duplicate adapter " + a.Name())
-	}
-	registry[a.Name()] = a
-}
+func Register(a Adapter) { adapters.Register(a.Name(), a) }
 
 // Names returns the sorted list of registered adapter names.
-func Names() []string {
-	names := make([]string, 0, len(registry))
-	for n := range registry {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
-}
+func Names() []string { return adapters.Names() }
 
 // Detect returns the first adapter that detects the repository at dir, or nil
-// when none applies (e.g. not a GitHub repo, or gh not installed).
+// when none applies (e.g. not a GitHub repo, or gh not installed). Adapters
+// are tried in sorted-name order so the outcome is deterministic.
 func Detect(dir string) Adapter {
-	for _, name := range Names() { // deterministic order
-		a := registry[name]
+	for _, a := range adapters.Values() {
 		if a.Detect(dir) {
 			return a
 		}

@@ -44,6 +44,8 @@ func (m *model) updateDetail(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.runAction("difftool")
 		case "r":
 			return m.runAction("remove")
+		case "R":
+			return m.startRefresh()
 		case "?":
 			m.helpReturn = viewDetail
 			m.view = viewHelp
@@ -93,8 +95,8 @@ func (m *model) updateConfirm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) viewDetailRender() string {
-	wt := m.selected()
-	if wt == nil {
+	wt, ok := m.selected()
+	if !ok {
 		return ""
 	}
 	var b strings.Builder
@@ -127,7 +129,7 @@ func (m *model) viewDetailRender() string {
 }
 
 // detailStatusLines returns the branch-status lines for the detail screen.
-func (m *model) detailStatusLines(wt *git.Worktree) []string {
+func (m *model) detailStatusLines(wt git.Worktree) []string {
 	var lines []string
 
 	// Working-tree line: clean, or staged/modified/untracked counts from the
@@ -175,7 +177,7 @@ func (m *model) detailStatusLines(wt *git.Worktree) []string {
 //   - PR open/closed                      -> reflects the PR state.
 //   - No PR info                          -> neutral "K commits ahead of <base>"
 //     fallback (never asserts "unmerged", since we can't know locally).
-func (m *model) mergeStatusLine(wt *git.Worktree) string {
+func (m *model) mergeStatusLine(wt git.Worktree) string {
 	base := wt.BaseBranch
 	if base == "" {
 		base = "default branch"
@@ -211,7 +213,7 @@ func (m *model) mergeStatusLine(wt *git.Worktree) string {
 }
 
 // prFor returns the loaded PR for a worktree (nil when unknown).
-func (m *model) prFor(wt *git.Worktree) *forge.PR {
+func (m *model) prFor(wt git.Worktree) *forge.PR {
 	if d, ok := m.details[wt.Path]; ok {
 		return d.pr
 	}
@@ -220,7 +222,7 @@ func (m *model) prFor(wt *git.Worktree) *forge.PR {
 
 // workingTreeSummary describes the working tree using the loaded porcelain
 // status when available, otherwise the coarse worktree Dirty flag.
-func (m *model) workingTreeSummary(wt *git.Worktree) string {
+func (m *model) workingTreeSummary(wt git.Worktree) string {
 	d, ok := m.details[wt.Path]
 	if !ok || d.statusErr != nil {
 		if wt.Dirty {
@@ -250,7 +252,7 @@ const detailChangedFilesMax = 8
 
 // detailChangedFiles renders a short, capped list of changed files (with their
 // two-character porcelain codes). Returns "" when clean or not yet loaded.
-func (m *model) detailChangedFiles(wt *git.Worktree) string {
+func (m *model) detailChangedFiles(wt git.Worktree) string {
 	d, ok := m.details[wt.Path]
 	if !ok || d.statusErr != nil || d.status.Clean() {
 		return ""
@@ -285,7 +287,7 @@ func statusCodeStyle(code string) lipgloss.Style {
 }
 
 // detailLog renders the recent commit log (or a placeholder while loading).
-func (m *model) detailLog(wt *git.Worktree) string {
+func (m *model) detailLog(wt git.Worktree) string {
 	d, ok := m.details[wt.Path]
 	switch {
 	case !ok:
