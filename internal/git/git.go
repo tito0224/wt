@@ -102,6 +102,49 @@ type Commit struct {
 	Subject   string // first line of the commit message
 }
 
+// Branch describes a branch that a worktree could be created for.
+type Branch struct {
+	// Name is the short branch name (e.g. "main", "feat/x").
+	Name string
+	// CheckedOutAt is the worktree path where this branch is currently checked
+	// out, or "" when it is not checked out anywhere. A branch checked out
+	// elsewhere cannot be added to a new worktree.
+	CheckedOutAt string
+	// Remote is the remote name for a remote-tracking branch (e.g. "origin"),
+	// empty for a local branch. Reserved for upcoming remote-branch support.
+	Remote string
+}
+
+// IsRemote reports whether the branch is a remote-tracking branch.
+func (b Branch) IsRemote() bool { return b.Remote != "" }
+
+// InUse reports whether the branch is already checked out in some worktree.
+func (b Branch) InUse() bool { return b.CheckedOutAt != "" }
+
+// LocalBranches lists the repository's local branches, most-recently-committed
+// first, annotated with whether each is currently checked out in a worktree.
+func LocalBranches(dir string) ([]Branch, error) {
+	out, err := run(dir, "for-each-ref",
+		"--sort=-committerdate",
+		"--format=%(refname:short)%00%(worktreepath)",
+		"refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	var branches []Branch
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		name, wtPath, _ := strings.Cut(line, "\x00")
+		if name == "" {
+			continue
+		}
+		branches = append(branches, Branch{Name: name, CheckedOutAt: wtPath})
+	}
+	return branches, nil
+}
+
 // commitFormat requests a commit's fields separated by NUL bytes (%x00) so any
 // field may contain arbitrary text. Records are separated by a record
 // separator (%x1e) when logging multiple commits.
@@ -469,10 +512,8 @@ func DeleteBranch(dir, branch string, force bool) error {
 // based on the given ref. When base is empty, git uses the current HEAD. The
 // parent directory of path is created if necessary.
 func Add(dir, path, branch, base string) error {
-	if parent := filepath.Dir(path); parent != "" {
-		if err := os.MkdirAll(parent, 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", parent, err)
-		}
+	if err := ensureParent(path); err != nil {
+		return err
 	}
 	args := []string{"worktree", "add", "-b", branch, path}
 	if base != "" {
@@ -480,6 +521,27 @@ func Add(dir, path, branch, base string) error {
 	}
 	_, err := run(dir, args...)
 	return err
+}
+
+// AddExisting creates a worktree at path checked out to an existing branch
+// (no new branch is created). The parent directory of path is created if
+// necessary.
+func AddExisting(dir, path, branch string) error {
+	if err := ensureParent(path); err != nil {
+		return err
+	}
+	_, err := run(dir, "worktree", "add", path, branch)
+	return err
+}
+
+// ensureParent creates the parent directory of path if needed.
+func ensureParent(path string) error {
+	if parent := filepath.Dir(path); parent != "" {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", parent, err)
+		}
+	}
+	return nil
 }
 
 // Prune removes worktree administrative files for missing worktrees.

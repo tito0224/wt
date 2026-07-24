@@ -110,7 +110,7 @@ Normal mode:
 | `j` / `k` / arrows | move |
 | `g` / `G` | jump to top / bottom |
 | `enter` | cd current shell into worktree |
-| `a` | add a new worktree |
+| `a` | add a worktree (new branch, or pick an existing one) |
 | `o` | open in new terminal tab |
 | `tab` / `→` | action submenu |
 | `r` | remove (`y` worktree · `b` worktree + branch · `n` cancel) |
@@ -127,6 +127,12 @@ As you move the highlight, a status bar shows the selected worktree's last
 commit (hash, relative date, author, subject) and, when the `gh` CLI is
 installed and the repo is on GitHub, its pull request (number, state, URL).
 These load in the background and are cached for the session.
+
+The add screen (`a`) lets you create a worktree for a new branch or an existing
+one: type a name to filter the list of local branches shown below the input.
+The top row always creates a new branch with the configured name; use `↑`/`↓`
+to pick an existing branch instead. Branches already checked out in another
+worktree are shown dimmed and can't be selected.
 
 ## Terminal selection
 

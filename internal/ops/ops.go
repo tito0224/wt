@@ -44,6 +44,22 @@ func AddWorktree(repoRoot, name, base, dir string) (branch, path string, err err
 	return branch, path, nil
 }
 
+// AddExistingBranch creates a new worktree checked out to an existing branch
+// in the repository containing repoRoot. The worktree directory is derived from
+// the branch name via the configured dir template (no branch prefix is applied,
+// since the branch already exists). It returns the absolute worktree path.
+func AddExistingBranch(repoRoot, branch string) (path string, err error) {
+	cfg, err := config.Load(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	path = cfg.Create.WorktreeDir(repoRoot, branch)
+	if err := git.AddExisting(repoRoot, path, branch); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // RemoveOptions controls a worktree removal.
 type RemoveOptions struct {
 	// Force discards uncommitted changes when removing the worktree.

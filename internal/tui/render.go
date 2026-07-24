@@ -116,7 +116,7 @@ func (m *model) computeLayout() layout {
 func (m *model) footer(help string) string {
 	var b strings.Builder
 	if m.spinner.active {
-		b.WriteString(titleStyle.Render(spinnerFrames[m.spinner.frame]) + " " + helpStyle.Render(m.spinner.msg))
+		b.WriteString(m.spinner.model.View() + " " + helpStyle.Render(m.spinner.msg))
 		return b.String()
 	}
 	if m.message != "" {

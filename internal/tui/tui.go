@@ -17,10 +17,11 @@ package tui
 import (
 	"fmt"
 	"os"
-	"runtime/debug"
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/johnlotito/wt/internal/forge"
@@ -42,6 +43,12 @@ const (
 type loadResultMsg struct {
 	wts []git.Worktree
 	err error
+}
+
+// branchListMsg carries the local branches loaded for the add screen.
+type branchListMsg struct {
+	branches []git.Branch
+	err      error
 }
 
 // createResultMsg is delivered when an async worktree creation finishes. On
@@ -131,20 +138,40 @@ type listState struct {
 	confirm   string // non-empty shows a confirmation prompt for this action
 }
 
-// createState is the create screen's state: the worktree name being typed.
+// createRow is one selectable line in the add screen. It is either the
+// "create a new branch" option (New == true, using the typed/generated name) or
+// an existing branch to check out.
+type createRow struct {
+	New     bool       // the top "new branch" option
+	branch  git.Branch // the existing branch (when !New)
+	matched []int      // fuzzy-match highlight indices into the display text
+}
+
+// selectable reports whether the row can be chosen. The new-branch option is
+// always selectable; a branch row is selectable unless it's already in use.
+func (r createRow) selectable() bool { return r.New || !r.branch.InUse() }
+
+// createState is the add screen's state: the text input (a bubbles textinput,
+// which handles cursor movement/editing), the list of existing local branches
+// (loaded async), and the filtered/selectable rows. Row 0 is always the "new
+// branch" option; the rest are matching branches.
 type createState struct {
-	buf string
+	input       textinput.Model
+	branches    []git.Branch // all local branches; loaded once on entering the view
+	loaded      bool
+	rows        []createRow // filtered view: row 0 = new, then matching branches
+	selectedRow int         // index into rows
 }
 
 // spinnerState is the cross-cutting busy/loading indicator state. active is
 // true during an async git operation (create/remove); loading is true during
 // the initial worktree enumeration. Either animates the spinner; msg labels an
-// active operation.
+// active operation. model is the bubbles spinner that owns the animation.
 type spinnerState struct {
 	active  bool
 	loading bool
 	msg     string
-	frame   int
+	model   spinner.Model
 }
 
 type model struct {
@@ -170,8 +197,8 @@ type model struct {
 	details   map[string]detail
 	detailGen int
 
-	cursor int // index into rows
-	offset int // scroll offset (first visible row)
+	selectedRow int // index of the highlighted worktree row
+	offset      int // scroll offset (first visible row)
 
 	width, height int
 
@@ -185,11 +212,12 @@ type model struct {
 
 // Run launches the interactive picker.
 //
-// The TUI renders to and reads from the controlling terminal (/dev/tty) rather
-// than stdin/stdout. This is essential because the shell wrapper invokes wt
-// inside $(...) to capture the chosen path for `cd`; if the TUI drew to stdout
-// it would be swallowed by that capture and appear to hang. Only the final
-// selected path is written to real stdout, for the wrapper to consume.
+// The TUI renders to stderr and reads from stdin — the standard pattern for a
+// tool invoked as $(wt) by the shell wrapper. Command substitution captures
+// only stdout, so drawing to stderr keeps the UI visible while leaving stdout
+// free for the single line of result (the chosen worktree path, for `cd`).
+// Using the process's real stdin/stderr (rather than opening /dev/tty) lets the
+// Bubble Tea and Bubbles components work as designed and keeps things portable.
 func Run(dir string, terminalName string) error {
 	// Start empty and in the loading state; Init kicks off async enumeration.
 	m := &model{
@@ -202,35 +230,20 @@ func Run(dir string, terminalName string) error {
 	}
 	m.recompute()
 
-	// Disable Bubble Tea's built-in panic catching so a panic (from the update
-	// loop or any of our tea.Cmd goroutines) propagates. We recover it below to
-	// restore the terminal and print the full stack to stderr, then re-panic so
-	// the process crashes with a complete, visible trace.
-	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithoutCatchPanics()}
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err == nil {
-		defer tty.Close()
-		opts = append(opts, tea.WithInput(tty), tea.WithOutput(tty))
-		// Detect color from the tty we actually draw to, not stdout (which the
-		// shell wrapper captures via $(...)).
-		initStyles(lipgloss.NewRenderer(tty))
-	} else {
-		// No controlling tty (e.g. piped): fall back to stderr for output so
-		// stdout stays clean for the result path.
-		opts = append(opts, tea.WithOutput(os.Stderr))
-		initStyles(lipgloss.NewRenderer(os.Stderr))
-	}
+	// Render to stderr; detect color from stderr (stdout may be captured by the
+	// shell wrapper's $(...), which would strip color).
+	initStyles(lipgloss.NewRenderer(os.Stderr))
+	m.spinner.model = newSpinner() // after initStyles: uses titleStyle
 
-	p := tea.NewProgram(m, opts...)
-	defer func() {
-		if r := recover(); r != nil {
-			// Best-effort: put the terminal back before dumping the trace so
-			// the output is readable and the shell isn't left in raw mode.
-			_ = p.RestoreTerminal()
-			fmt.Fprintf(os.Stderr, "wt: panic: %v\n\n%s", r, debug.Stack())
-			os.Exit(2)
-		}
-	}()
+	// Bubble Tea's built-in panic handling (enabled by default) recovers panics
+	// from both the update loop and command goroutines, restores the terminal,
+	// and prints the panic value + stack trace before the program exits. We rely
+	// on it rather than rolling our own so a panic anywhere crashes the app
+	// visibly instead of being swallowed.
+	p := tea.NewProgram(m,
+		tea.WithAltScreen(),
+		tea.WithOutput(os.Stderr),
+	)
 
 	res, err := p.Run()
 	if err != nil {
@@ -248,7 +261,7 @@ func Run(dir string, terminalName string) error {
 
 func (m *model) Init() tea.Cmd {
 	// Begin animating the spinner and enumerating worktrees concurrently.
-	return tea.Batch(spinTick(), loadCmd(m.dir))
+	return tea.Batch(m.spinner.model.Tick, loadCmd(m.dir))
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -259,15 +272,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Force a full repaint so shrinking the terminal can't leave stale
 		// lines from the previous (taller/wider) frame on screen.
 		return m, tea.ClearScreen
-	case spinTickMsg:
-		// Keep animating only while some git operation is still in flight.
+	case spinner.TickMsg:
+		// Advance the spinner only while some git operation is still in flight;
+		// otherwise let the tick loop stop.
 		if !m.spinner.active && !m.spinner.loading {
 			return m, nil
 		}
-		m.spinner.frame = (m.spinner.frame + 1) % len(spinnerFrames)
-		return m, spinTick()
+		var cmd tea.Cmd
+		m.spinner.model, cmd = m.spinner.model.Update(msg)
+		return m, cmd
 	case loadResultMsg:
 		return m.handleLoadResult(msg)
+	case branchListMsg:
+		return m.handleBranchList(msg)
 	case createResultMsg:
 		return m.handleCreateResult(msg)
 	case removeResultMsg:
@@ -315,6 +332,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return mm, tea.Batch(cmd, mm.scheduleDetail())
 		}
 		return newM, cmd
+	}
+	// Non-key messages (e.g. the textinput's cursor blink) are forwarded to the
+	// add screen's input while it's active, so the cursor animates.
+	if m.view == viewCreate {
+		var cmd tea.Cmd
+		m.create.input, cmd = m.create.input.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -400,11 +424,11 @@ func (m *model) recompute() {
 			return m.rows[i].score > m.rows[j].score
 		})
 	}
-	if m.cursor >= len(m.rows) {
-		m.cursor = len(m.rows) - 1
+	if m.selectedRow >= len(m.rows) {
+		m.selectedRow = len(m.rows) - 1
 	}
-	if m.cursor < 0 {
-		m.cursor = 0
+	if m.selectedRow < 0 {
+		m.selectedRow = 0
 	}
 	m.clampScroll()
 }
@@ -427,11 +451,11 @@ func (m *model) visibleRows() int {
 
 func (m *model) clampScroll() {
 	vis := m.visibleRows()
-	if m.cursor < m.offset {
-		m.offset = m.cursor
+	if m.selectedRow < m.offset {
+		m.offset = m.selectedRow
 	}
-	if m.cursor >= m.offset+vis {
-		m.offset = m.cursor - vis + 1
+	if m.selectedRow >= m.offset+vis {
+		m.offset = m.selectedRow - vis + 1
 	}
 	if m.offset < 0 {
 		m.offset = 0
@@ -439,20 +463,20 @@ func (m *model) clampScroll() {
 }
 
 func (m *model) selected() *git.Worktree {
-	if m.cursor < 0 || m.cursor >= len(m.rows) {
+	if m.selectedRow < 0 || m.selectedRow >= len(m.rows) {
 		return nil
 	}
-	return &m.rows[m.cursor].wt
+	return &m.rows[m.selectedRow].wt
 }
 
 func (m *model) moveCursor(delta int) {
 	m.message = ""
-	m.cursor += delta
-	if m.cursor < 0 {
-		m.cursor = 0
+	m.selectedRow += delta
+	if m.selectedRow < 0 {
+		m.selectedRow = 0
 	}
-	if m.cursor > len(m.rows)-1 {
-		m.cursor = len(m.rows) - 1
+	if m.selectedRow > len(m.rows)-1 {
+		m.selectedRow = len(m.rows) - 1
 	}
 	m.clampScroll()
 }
@@ -462,7 +486,7 @@ func (m *model) moveCursor(delta int) {
 func (m *model) selectByPath(path string) {
 	for i := range m.rows {
 		if m.rows[i].wt.Path == path {
-			m.cursor = i
+			m.selectedRow = i
 			m.clampScroll()
 			return
 		}

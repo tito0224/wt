@@ -44,11 +44,11 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveCursor(m.visibleRows())
 		return m, nil
 	case tea.KeyHome:
-		m.cursor = 0
+		m.selectedRow = 0
 		m.clampScroll()
 		return m, nil
 	case tea.KeyEnd:
-		m.cursor = len(m.rows) - 1
+		m.selectedRow = len(m.rows) - 1
 		m.clampScroll()
 		return m, nil
 	case tea.KeyEnter:
@@ -71,10 +71,10 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "k":
 			m.moveCursor(-1)
 		case "g":
-			m.cursor = 0
+			m.selectedRow = 0
 			m.clampScroll()
 		case "G":
-			m.cursor = len(m.rows) - 1
+			m.selectedRow = len(m.rows) - 1
 			m.clampScroll()
 		case "o":
 			return m.runAction("open")
@@ -85,9 +85,7 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "D":
 			return m.runAction("difftool")
 		case "a":
-			m.view = viewCreate
-			m.create.buf = ""
-			m.message = ""
+			return m.enterCreate()
 		case "l":
 			if m.selected() != nil {
 				m.view = viewDetail
@@ -181,7 +179,7 @@ func (m *model) viewListRender() string {
 		end = len(m.rows)
 	}
 	for i := m.offset; i < end; i++ {
-		b.WriteString(m.renderRow(m.rows[i], i == m.cursor, lay) + "\n")
+		b.WriteString(m.renderRow(m.rows[i], i == m.selectedRow, lay) + "\n")
 	}
 
 	// Scroll indicator.
