@@ -1,4 +1,4 @@
-module github.com/johnlotito/wt
+module github.com/tito0224/wt
 
 go 1.26
 

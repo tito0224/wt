@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/johnlotito/wt/internal/git"
+	"github.com/tito0224/wt/internal/git"
 )
 
 // Persistent flags shared across all commands, registered on the root command.

@@ -1,11 +1,11 @@
 package main
 
 import (
-	"github.com/johnlotito/wt/internal/config"
-	"github.com/johnlotito/wt/internal/git"
-	"github.com/johnlotito/wt/internal/launcher"
-	"github.com/johnlotito/wt/internal/tui"
 	"github.com/spf13/cobra"
+	"github.com/tito0224/wt/internal/config"
+	"github.com/tito0224/wt/internal/git"
+	"github.com/tito0224/wt/internal/launcher"
+	"github.com/tito0224/wt/internal/tui"
 )
 
 func newRootCmd() *cobra.Command {

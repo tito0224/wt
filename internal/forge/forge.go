@@ -10,7 +10,7 @@ package forge
 import (
 	"errors"
 
-	"github.com/johnlotito/wt/internal/registry"
+	"github.com/tito0224/wt/internal/registry"
 )
 
 // ErrNoPR is returned by Adapter.PR / LookupPR when the lookup succeeded but

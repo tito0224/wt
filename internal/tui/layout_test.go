@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/johnlotito/wt/internal/git"
+	"github.com/tito0224/wt/internal/git"
 )
 
 func rowsFixture() []row {

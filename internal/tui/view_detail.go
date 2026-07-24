@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/johnlotito/wt/internal/forge"
-	"github.com/johnlotito/wt/internal/git"
+	"github.com/tito0224/wt/internal/forge"
+	"github.com/tito0224/wt/internal/git"
 )
 
 // updateDetail handles keys on the full-detail screen. esc/tab/left return to

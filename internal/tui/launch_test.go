@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/johnlotito/wt/internal/launcher"
+	"github.com/tito0224/wt/internal/launcher"
 )
 
 // fakeLauncher is a no-op GUI launcher so tests can drive the launch submenu

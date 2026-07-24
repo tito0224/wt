@@ -24,11 +24,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/johnlotito/wt/internal/config"
-	"github.com/johnlotito/wt/internal/forge"
-	"github.com/johnlotito/wt/internal/git"
-	"github.com/johnlotito/wt/internal/launcher"
-	"github.com/johnlotito/wt/internal/ops"
+	"github.com/tito0224/wt/internal/config"
+	"github.com/tito0224/wt/internal/forge"
+	"github.com/tito0224/wt/internal/git"
+	"github.com/tito0224/wt/internal/launcher"
+	"github.com/tito0224/wt/internal/ops"
 )
 
 type view int

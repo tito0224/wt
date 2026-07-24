@@ -13,8 +13,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/johnlotito/wt/internal/config"
-	"github.com/johnlotito/wt/internal/git"
+	"github.com/tito0224/wt/internal/config"
+	"github.com/tito0224/wt/internal/git"
 )
 
 // AddWorktree creates a new worktree named `name` in the repository containing

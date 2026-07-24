@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/johnlotito/wt/internal/browser"
-	"github.com/johnlotito/wt/internal/git"
-	"github.com/johnlotito/wt/internal/ops"
-	"github.com/johnlotito/wt/internal/terminal"
+	"github.com/tito0224/wt/internal/browser"
+	"github.com/tito0224/wt/internal/git"
+	"github.com/tito0224/wt/internal/ops"
+	"github.com/tito0224/wt/internal/terminal"
 )
 
 // execDoneMsg is delivered after a suspended external process (diff/difftool)

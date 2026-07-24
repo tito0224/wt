@@ -11,9 +11,9 @@ package launcher
 import (
 	"fmt"
 
-	"github.com/johnlotito/wt/internal/browser"
-	"github.com/johnlotito/wt/internal/registry"
-	"github.com/johnlotito/wt/internal/terminal"
+	"github.com/tito0224/wt/internal/browser"
+	"github.com/tito0224/wt/internal/registry"
+	"github.com/tito0224/wt/internal/terminal"
 )
 
 // Kind categorizes how a launcher runs.
