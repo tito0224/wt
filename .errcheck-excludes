@@ -1,0 +1,8 @@
+# Error returns deliberately ignored (errcheck -exclude):
+#  - fmt.Fprint* to tabwriter/strings.Builder buffers cannot meaningfully fail
+#    before the (checked) Flush; checking each write is pure noise.
+#  - os.Unsetenv only fails on invalid names; used in test cleanup.
+fmt.Fprint
+fmt.Fprintf
+fmt.Fprintln
+os.Unsetenv
