@@ -14,7 +14,6 @@ import (
 	"text/template"
 
 	"github.com/BurntSushi/toml"
-	"github.com/johnlotito/wt/internal/git"
 )
 
 // exampleTemplate is the commented config file scaffold. It is a Go text
@@ -136,37 +135,6 @@ func applyEnv(cfg *Config) {
 	if v, ok := os.LookupEnv("WT_BRANCH_SEPARATOR"); ok {
 		cfg.Create.BranchSeparator = v
 	}
-}
-
-// CreateWorktree loads the effective config for the repository containing
-// repoRoot and creates a new worktree named `name`. The base branch, target
-// directory, and branch naming come from config; empty base falls back to the
-// repository's default branch. It returns the resolved branch name and the
-// absolute worktree path.
-//
-// The base and dir arguments, when non-empty, override the corresponding
-// config values (mirroring the create command's flags).
-func CreateWorktree(repoRoot, name, base, dir string) (branch, path string, err error) {
-	cfg, err := Load(repoRoot)
-	if err != nil {
-		return "", "", err
-	}
-	if base != "" {
-		cfg.Create.BaseBranch = base
-	}
-	if dir != "" {
-		cfg.Create.Dir = dir
-	}
-	if cfg.Create.BaseBranch == "" {
-		cfg.Create.BaseBranch = git.DefaultBranch(repoRoot)
-	}
-
-	branch = cfg.Create.BranchName(name)
-	path = cfg.Create.WorktreeDir(repoRoot, name)
-	if err := git.Add(repoRoot, path, branch, cfg.Create.BaseBranch); err != nil {
-		return "", "", err
-	}
-	return branch, path, nil
 }
 
 // BranchName composes a branch name from the configured prefix, separator, and

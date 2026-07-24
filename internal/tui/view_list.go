@@ -58,8 +58,7 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyTab, tea.KeyRight:
 		if m.selected() != nil {
-			m.view = viewActions
-			m.menu.cursor = 0
+			m.view = viewDetail
 		}
 		return m, nil
 	case tea.KeyRunes:
@@ -79,14 +78,25 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampScroll()
 		case "o":
 			return m.runAction("open")
+		case "p":
+			return m.runAction("openpr")
+		case "d":
+			return m.runAction("diff")
+		case "D":
+			return m.runAction("difftool")
 		case "a":
 			m.view = viewCreate
 			m.create.buf = ""
 			m.message = ""
-		case "s":
-			return m.runAction("status")
+		case "l":
+			if m.selected() != nil {
+				m.view = viewDetail
+			}
 		case "r":
 			return m.runAction("remove")
+		case "?":
+			m.helpReturn = viewList
+			m.view = viewHelp
 		case "q":
 			m.quit = true
 			return m, tea.Quit
@@ -179,43 +189,18 @@ func (m *model) viewListRender() string {
 		b.WriteString(helpStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.offset+1, end, len(m.rows))) + "\n")
 	}
 
-	// Confirmation prompt takes over the footer when active.
-	if m.menu.confirm == "remove" {
-		wt := m.selected()
-		name := ""
-		if wt != nil {
-			name = wt.Label()
-		}
-		warn := ""
-		if wt != nil && wt.Dirty {
-			warn = errorStyle.Render(" [has uncommitted changes!]")
-		}
-		b.WriteString("\n" + errorStyle.Render(fmt.Sprintf("remove %s?", name)) + warn +
-			helpStyle.Render("  (y/n)"))
-		return b.String()
-	}
-
 	// Status bar: async-loaded detail (last commit + PR) for the selection.
 	if sb := m.statusBar(); sb != "" {
 		b.WriteString("\n" + sb + "\n")
 	}
 
-	// Footer: a transient message (or spinner) line, then the key bar.
+	// Footer. While typing a filter, show the search hint; otherwise the shared
+	// key bar (with a confirm prompt / message / spinner as applicable).
 	b.WriteString("\n")
-	if m.spinner.active {
-		b.WriteString(titleStyle.Render(spinnerFrames[m.spinner.frame]) + " " +
-			helpStyle.Render(m.spinner.msg) + "\n")
-	} else if m.message != "" {
-		if m.isErr {
-			b.WriteString(errorStyle.Render("✗ "+m.message) + "\n")
-		} else {
-			b.WriteString(cleanStyle.Render("✓ "+m.message) + "\n")
-		}
-	}
-	if m.list.searching {
+	if m.list.searching && m.list.confirm == "" {
 		b.WriteString(helpStyle.Render("type to filter · enter/esc done"))
 	} else {
-		b.WriteString(renderKeyBar(listKeyHints))
+		b.WriteString(m.keyBarFooter(m.keyBarHints(viewList, m.selectedPR() != nil, m.selectedDirty())))
 	}
 	return b.String()
 }

@@ -1,19 +1,23 @@
 // Package tui provides an interactive worktree picker rendered as a scrollable,
-// fuzzy-filterable table with an action submenu.
+// fuzzy-filterable table, with a per-worktree status bar and a full details
+// screen.
 //
 // The code is organized by concern:
 //
 //   - tui.go            the model, message types, Run, and the Update/View dispatch
 //   - styles.go         lipgloss styles
 //   - spinner.go        the busy/loading spinner
+//   - statusbar.go      the selection status bar + key bar
+//   - detail.go         async loading of per-worktree detail (commits, PR)
 //   - commands.go       async git effects and their result reducers
 //   - render.go         shared rendering + layout helpers
-//   - view_*.go         per-view update + render (list, actions, create, loading)
+//   - view_*.go         per-view update + render (list, detail, create, loading)
 package tui
 
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -21,14 +25,16 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/johnlotito/wt/internal/forge"
 	"github.com/johnlotito/wt/internal/git"
+	"github.com/johnlotito/wt/internal/ops"
 )
 
 type view int
 
 const (
 	viewList view = iota
-	viewActions
+	viewDetail
 	viewCreate
+	viewHelp
 )
 
 // loadResultMsg is delivered when the initial (or a refreshed) worktree
@@ -47,12 +53,22 @@ type createResultMsg struct {
 	err    error
 }
 
-// removeResultMsg is delivered when an async worktree removal finishes.
+// removeResultMsg is delivered when an async worktree removal finishes. result
+// carries the typed outcome (branch deleted / left unmerged); err is the
+// removal error (nil on success).
 type removeResultMsg struct {
-	label string
-	path  string
-	force bool
-	err   error
+	label  string
+	path   string
+	force  bool
+	result ops.RemoveResult
+	err    error
+}
+
+// branchDeleteResultMsg is delivered when a standalone (forced) branch deletion
+// finishes — used for the force-delete follow-up after an unmerged refusal.
+type branchDeleteResultMsg struct {
+	branch string
+	err    error
 }
 
 // detailDebounceMsg fires after a short delay following a selection change. It
@@ -72,14 +88,29 @@ type detailResultMsg struct {
 	detail detail
 }
 
-// detail holds the extra, lazily-loaded information shown in the status bar for
-// the highlighted worktree.
+// detail holds the extra, lazily-loaded information shown for the highlighted
+// worktree: a one-line summary in the status bar (last commit + PR) and, on the
+// detail screen, the working-tree status and recent commit log.
 type detail struct {
-	commit    git.Commit
+	commits   []git.Commit // most-recent first; commits[0] is HEAD
 	commitErr error
+
+	status    git.WorktreeStatus
+	statusErr error
 
 	pr        *forge.PR
 	prChecked bool // true once a forge lookup completed (found or definitively none)
+	// postMerge counts commits on the branch made after the PR merged (only
+	// meaningful when pr.State == MERGED); >0 means genuinely-unmerged new work.
+	postMerge int
+}
+
+// last returns the HEAD commit, or a zero Commit when the log is empty.
+func (d detail) last() git.Commit {
+	if len(d.commits) == 0 {
+		return git.Commit{}
+	}
+	return d.commits[0]
 }
 
 // row is a worktree paired with its fuzzy-match metadata for the current
@@ -90,18 +121,14 @@ type row struct {
 	matched []int // matched rune indices in the label, for highlighting
 }
 
-// listState is the list screen's own state: the fuzzy filter and whether the
-// search input is active.
+// listState is the list screen's own state: the fuzzy filter, whether the
+// search input is active, and any pending destructive-action confirmation
+// ("remove" for the initial y/b/n prompt, "force-branch" for the follow-up
+// unmerged-branch force-delete prompt).
 type listState struct {
 	filter    string
-	searching bool // true while in search-input mode (entered with '/')
-}
-
-// menuState is the action submenu's state: the highlighted action and, when
-// non-empty, an active y/n confirmation prompt for that action.
-type menuState struct {
-	cursor  int
-	confirm string // non-empty shows a y/n confirmation prompt for this action
+	searching bool   // true while in search-input mode (entered with '/')
+	confirm   string // non-empty shows a confirmation prompt for this action
 }
 
 // createState is the create screen's state: the worktree name being typed.
@@ -125,13 +152,17 @@ type model struct {
 	all          []git.Worktree // full, unfiltered set
 	terminalName string
 
-	view view
-	rows []row // filtered view of `all`
+	view       view
+	helpReturn view  // view to restore when leaving the help overlay
+	rows       []row // filtered view of `all`
 
 	list    listState
-	menu    menuState
 	create  createState
 	spinner spinnerState
+
+	// pendingBranch is the branch awaiting a force-delete decision after a
+	// worktree removal whose safe branch delete was refused (unmerged).
+	pendingBranch string
 
 	// details caches loaded status-bar info per worktree path. detailGen is
 	// bumped on every selection change to debounce and discard stale async
@@ -171,7 +202,11 @@ func Run(dir string, terminalName string) error {
 	}
 	m.recompute()
 
-	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	// Disable Bubble Tea's built-in panic catching so a panic (from the update
+	// loop or any of our tea.Cmd goroutines) propagates. We recover it below to
+	// restore the terminal and print the full stack to stderr, then re-panic so
+	// the process crashes with a complete, visible trace.
+	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithoutCatchPanics()}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err == nil {
 		defer tty.Close()
@@ -186,7 +221,18 @@ func Run(dir string, terminalName string) error {
 		initStyles(lipgloss.NewRenderer(os.Stderr))
 	}
 
-	res, err := tea.NewProgram(m, opts...).Run()
+	p := tea.NewProgram(m, opts...)
+	defer func() {
+		if r := recover(); r != nil {
+			// Best-effort: put the terminal back before dumping the trace so
+			// the output is readable and the shell isn't left in raw mode.
+			_ = p.RestoreTerminal()
+			fmt.Fprintf(os.Stderr, "wt: panic: %v\n\n%s", r, debug.Stack())
+			os.Exit(2)
+		}
+	}()
+
+	res, err := p.Run()
 	if err != nil {
 		return err
 	}
@@ -194,11 +240,8 @@ func Run(dir string, terminalName string) error {
 	if fm.resultWT == nil {
 		return nil
 	}
-	switch fm.resultAction {
-	case "cd":
+	if fm.resultAction == "cd" {
 		fmt.Println(fm.resultWT.Path)
-	case "status":
-		printStatus(*fm.resultWT)
 	}
 	return nil
 }
@@ -229,10 +272,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCreateResult(msg)
 	case removeResultMsg:
 		return m.handleRemoveResult(msg)
+	case branchDeleteResultMsg:
+		return m.handleBranchDeleteResult(msg)
 	case detailDebounceMsg:
 		return m.handleDetailDebounce(msg)
 	case detailResultMsg:
 		return m.handleDetailResult(msg)
+	case execDoneMsg:
+		if msg.err != nil {
+			m.setErr(msg.err.Error())
+		}
+		// Force a repaint: the external program scribbled over the alt-screen.
+		return m, tea.ClearScreen
 	case tea.KeyMsg:
 		// While loading or a git operation is running, swallow input except
 		// Ctrl-C so the spinner isn't interrupted and no conflicting action
@@ -244,14 +295,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.menu.confirm != "" {
+		if m.list.confirm != "" {
 			return m.updateConfirm(msg)
+		}
+		if m.view == viewHelp {
+			return m.updateHelp(msg)
 		}
 		if m.view == viewCreate {
 			return m.updateCreate(msg)
 		}
-		if m.view == viewActions {
-			return m.updateActions(msg)
+		if m.view == viewDetail {
+			return m.updateDetail(msg)
 		}
 		// Track the selected worktree across the key handler so a changed
 		// selection can (debounced) load its status-bar detail.
@@ -273,6 +327,26 @@ func (m *model) selectedPath() string {
 	return ""
 }
 
+// selectedPR returns the loaded PR for the highlighted worktree, or nil when
+// none is known (not loaded, no forge, or no PR).
+func (m *model) selectedPR() *forge.PR {
+	wt := m.selected()
+	if wt == nil {
+		return nil
+	}
+	if d, ok := m.details[wt.Path]; ok {
+		return d.pr
+	}
+	return nil
+}
+
+// selectedDirty reports whether the highlighted worktree has uncommitted
+// changes (so diff actions apply).
+func (m *model) selectedDirty() bool {
+	wt := m.selected()
+	return wt != nil && wt.Dirty
+}
+
 func (m *model) View() string {
 	if m.quit {
 		return ""
@@ -282,10 +356,12 @@ func (m *model) View() string {
 	}
 	var raw string
 	switch m.view {
-	case viewActions:
-		raw = m.viewActionsRender()
+	case viewDetail:
+		raw = m.viewDetailRender()
 	case viewCreate:
 		raw = m.viewCreateRender()
+	case viewHelp:
+		raw = m.viewHelpRender()
 	default:
 		raw = m.viewListRender()
 	}

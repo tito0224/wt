@@ -7,7 +7,16 @@
 // branch has no request, callers get a nil PR rather than an error.
 package forge
 
-import "sort"
+import (
+	"errors"
+	"sort"
+)
+
+// ErrNoPR is returned by Adapter.PR / LookupPR when the lookup succeeded but
+// the branch has no associated pull/merge request. This is a definitive answer
+// (distinct from a network or CLI failure) and is safe to cache. Use
+// errors.Is(err, ErrNoPR) to test for it.
+var ErrNoPR = errors.New("forge: no pull request for branch")
 
 // PR is the subset of pull/merge-request fields wt displays.
 type PR struct {
@@ -16,6 +25,9 @@ type PR struct {
 	State   string // OPEN, MERGED, CLOSED (uppercased by adapters)
 	URL     string
 	IsDraft bool
+	// MergedAt is the merge time (RFC3339) when State is MERGED, else empty.
+	// Used to detect commits pushed to the branch after it was merged.
+	MergedAt string
 }
 
 // Adapter knows how to resolve the pull/merge request for a branch in a
@@ -30,11 +42,10 @@ type Adapter interface {
 	// dir, typically by inspecting the git remote host and checking that the
 	// provider's CLI is installed.
 	Detect(dir string) bool
-	// PR returns the request for branch in the repository at dir. The returned
-	// PR is nil when the branch has no associated request. found reports whether
-	// a definitive answer was obtained, so callers can distinguish "no PR" from
-	// "lookup failed" (and avoid caching failures as "none").
-	PR(dir, branch string) (pr *PR, found bool)
+	// PR returns the request for branch in the repository at dir. It returns
+	// ErrNoPR when the lookup succeeded but there is no PR (a definitive,
+	// cacheable answer), or another error when the lookup itself failed.
+	PR(dir, branch string) (*PR, error)
 }
 
 var registry = map[string]Adapter{}

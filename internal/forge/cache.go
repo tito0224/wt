@@ -1,6 +1,9 @@
 package forge
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
 
 // cacheKey identifies a cached lookup.
 type cacheKey struct {
@@ -8,12 +11,12 @@ type cacheKey struct {
 	branch string
 }
 
-// cacheEntry records a completed lookup. found is false when the adapter
-// returned no PR for the branch (a valid, cacheable outcome distinct from "not
-// yet looked up").
+// cacheEntry records a completed lookup: the PR (nil for a definitive "no PR")
+// and the error (ErrNoPR when there is none). Only definitive results are
+// cached — transient failures are not, so they're retried.
 type cacheEntry struct {
-	pr    *PR
-	found bool
+	pr  *PR
+	err error
 }
 
 var (
@@ -42,33 +45,39 @@ func adapterFor(dir string) Adapter {
 }
 
 // LookupPR resolves the PR for branch in the repository at dir using the
-// detected forge adapter. The returned PR is nil when no forge is detected, the
-// branch has no associated PR, or the lookup fails. found reports whether a
-// definitive answer was obtained.
+// detected forge adapter. It returns:
 //
-// Results (including a definitive "no PR") are cached in memory for the process
+//   - (pr, nil)        the branch has a PR
+//   - (nil, ErrNoPR)   no forge detected, or the branch has no PR (definitive)
+//   - (nil, otherErr)  the lookup failed (transient; not cached)
+//
+// Definitive results (a PR, or ErrNoPR) are cached in memory for the process
 // lifetime, since forge CLI calls are comparatively slow (network round-trip).
-func LookupPR(dir, branch string) (*PR, bool) {
+func LookupPR(dir, branch string) (*PR, error) {
 	if branch == "" {
-		return nil, false
+		return nil, ErrNoPR
 	}
 	a := adapterFor(dir)
 	if a == nil {
-		return nil, false
+		return nil, ErrNoPR
 	}
 
 	key := cacheKey{dir: dir, branch: branch}
 	cacheMu.Lock()
 	if e, ok := cache[key]; ok {
 		cacheMu.Unlock()
-		return e.pr, e.found
+		return e.pr, e.err
 	}
 	cacheMu.Unlock()
 
-	pr, found := a.PR(dir, branch)
+	pr, err := a.PR(dir, branch)
 
-	cacheMu.Lock()
-	cache[key] = cacheEntry{pr: pr, found: found}
-	cacheMu.Unlock()
-	return pr, found
+	// Cache definitive outcomes only (a PR, or a definitive ErrNoPR). Transient
+	// failures are left uncached so a later selection retries.
+	if err == nil || errors.Is(err, ErrNoPR) {
+		cacheMu.Lock()
+		cache[key] = cacheEntry{pr: pr, err: err}
+		cacheMu.Unlock()
+	}
+	return pr, err
 }

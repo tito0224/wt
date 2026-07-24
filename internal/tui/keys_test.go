@@ -52,12 +52,12 @@ func TestNormalShortcutsNotFilter(t *testing.T) {
 	}
 	// 'r' triggers remove confirmation, not immediate removal.
 	m.updateNormal(runeKey('r'))
-	if m.menu.confirm != "remove" {
-		t.Fatalf("expected confirm=remove, got %q", m.menu.confirm)
+	if m.list.confirm != "remove" {
+		t.Fatalf("expected confirm=remove, got %q", m.list.confirm)
 	}
 	// 'n' cancels.
 	m.updateConfirm(runeKey('n'))
-	if m.menu.confirm != "" {
+	if m.list.confirm != "" {
 		t.Fatal("expected confirm cleared after n")
 	}
 }
