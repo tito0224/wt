@@ -8,9 +8,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/johnlotito/wt/internal/config"
-	"github.com/johnlotito/wt/internal/git"
 	"github.com/spf13/cobra"
+	"github.com/tito0224/wt/internal/config"
+	"github.com/tito0224/wt/internal/git"
 )
 
 func newConfigCmd() *cobra.Command {

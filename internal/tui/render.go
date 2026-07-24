@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/johnlotito/wt/internal/git"
+	"github.com/tito0224/wt/internal/git"
 )
 
 // clampFrame guarantees the rendered frame never exceeds the terminal size:

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/johnlotito/wt/internal/forge"
-	"github.com/johnlotito/wt/internal/git"
+	"github.com/tito0224/wt/internal/forge"
+	"github.com/tito0224/wt/internal/git"
 )
 
 // keyHint is a single key/label pair shown in the footer key bar. When

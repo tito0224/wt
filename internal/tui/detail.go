@@ -5,8 +5,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/johnlotito/wt/internal/forge"
-	"github.com/johnlotito/wt/internal/git"
+	"github.com/tito0224/wt/internal/forge"
+	"github.com/tito0224/wt/internal/git"
 )
 
 // detailDebounce is how long to wait after the selection settles before

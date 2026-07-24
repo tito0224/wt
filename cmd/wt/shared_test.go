@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johnlotito/wt/internal/git"
+	"github.com/tito0224/wt/internal/git"
 )
 
 func TestFindWorktree(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/johnlotito/wt/internal/launcher"
-	"github.com/johnlotito/wt/internal/terminal"
+	"github.com/tito0224/wt/internal/launcher"
+	"github.com/tito0224/wt/internal/terminal"
 )
 
 // quickLaunch opens the selected worktree in the default launcher without a

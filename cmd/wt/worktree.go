@@ -5,10 +5,10 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/johnlotito/wt/internal/git"
-	"github.com/johnlotito/wt/internal/ops"
-	"github.com/johnlotito/wt/internal/terminal"
 	"github.com/spf13/cobra"
+	"github.com/tito0224/wt/internal/git"
+	"github.com/tito0224/wt/internal/ops"
+	"github.com/tito0224/wt/internal/terminal"
 )
 
 func newListCmd() *cobra.Command {

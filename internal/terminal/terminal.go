@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/johnlotito/wt/internal/registry"
+	"github.com/tito0224/wt/internal/registry"
 )
 
 // Adapter knows how to launch a new terminal tab/window in a directory.

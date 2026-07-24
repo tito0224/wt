@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/johnlotito/wt/internal/shell"
 	"github.com/spf13/cobra"
+	"github.com/tito0224/wt/internal/shell"
 )
 
 func newShellCmd() *cobra.Command {

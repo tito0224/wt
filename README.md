@@ -22,7 +22,7 @@ by either `cd`-ing your current shell or opening a new terminal tab.
 ## Install
 
 ```sh
-go install github.com/johnlotito/wt/cmd/wt@latest
+go install github.com/tito0224/wt/cmd/wt@latest
 ```
 
 ### Shell integration (required for `cd`-in-place)

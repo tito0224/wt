@@ -5,8 +5,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/johnlotito/wt/internal/terminal"
 	"github.com/spf13/cobra"
+	"github.com/tito0224/wt/internal/terminal"
 )
 
 func newTerminalsCmd() *cobra.Command {

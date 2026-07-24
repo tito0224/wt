@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/johnlotito/wt/internal/config"
-	"github.com/johnlotito/wt/internal/git"
+	"github.com/tito0224/wt/internal/config"
+	"github.com/tito0224/wt/internal/git"
 )
 
 // enterCreate initializes and opens the add screen, kicking off the async
