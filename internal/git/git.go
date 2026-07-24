@@ -5,6 +5,7 @@ package git
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -66,6 +67,19 @@ func run(dir string, args ...string) (string, error) {
 func IsRepo(dir string) bool {
 	_, err := run(dir, "rev-parse", "--is-inside-work-tree")
 	return err == nil
+}
+
+// TopLevel returns the absolute path to the root of the working tree
+// containing dir.
+func TopLevel(dir string) (string, error) {
+	return run(dir, "rev-parse", "--show-toplevel")
+}
+
+// DefaultBranch returns the repository's primary branch, preferring the remote
+// HEAD (e.g. "origin/main"), then the local "main"/"master". It returns an
+// empty string when none can be determined.
+func DefaultBranch(dir string) string {
+	return defaultBranch(dir)
 }
 
 // defaultBranch attempts to determine the repository's primary branch,
@@ -255,6 +269,23 @@ func Remove(dir, path string, force bool) error {
 		args = append(args, "--force")
 	}
 	args = append(args, path)
+	_, err := run(dir, args...)
+	return err
+}
+
+// Add creates a new worktree at path checked out to a newly created branch,
+// based on the given ref. When base is empty, git uses the current HEAD. The
+// parent directory of path is created if necessary.
+func Add(dir, path, branch, base string) error {
+	if parent := filepath.Dir(path); parent != "" {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", parent, err)
+		}
+	}
+	args := []string{"worktree", "add", "-b", branch, path}
+	if base != "" {
+		args = append(args, base)
+	}
 	_, err := run(dir, args...)
 	return err
 }

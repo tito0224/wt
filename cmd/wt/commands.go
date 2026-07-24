@@ -6,6 +6,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/johnlotito/wt/internal/config"
 	"github.com/johnlotito/wt/internal/git"
 	"github.com/johnlotito/wt/internal/terminal"
 	"github.com/spf13/cobra"
@@ -148,6 +149,54 @@ func newStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newCreateCmd() *cobra.Command {
+	var (
+		base string
+		dir  string
+		tab  bool
+	)
+	cmd := &cobra.Command{
+		Use:     "create <name>",
+		Aliases: []string{"new", "add"},
+		Short:   "Create a new worktree",
+		Long: "Create a new worktree and branch for <name>.\n\n" +
+			"Defaults for the base branch, target directory, and branch naming " +
+			"come from the wt config file (see `wt config path`), and can be " +
+			"overridden per-invocation with flags.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			repo := repoDir()
+			if !git.IsRepo(repo) {
+				return fmt.Errorf("%s is not a git repository", repo)
+			}
+			top, err := git.TopLevel(repo)
+			if err != nil {
+				return err
+			}
+
+			branch, path, err := config.CreateWorktree(top, name, base, dir)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("created worktree %s at %s\n", branch, path)
+
+			if tab {
+				adapter, err := terminal.Resolve(flagTerminal)
+				if err != nil {
+					return err
+				}
+				return adapter.OpenTab(path)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&base, "base", "", "base branch/ref to create from (overrides config)")
+	cmd.Flags().StringVar(&dir, "into", "", "directory to place the worktree in (overrides config)")
+	cmd.Flags().BoolVar(&tab, "tab", false, "open a new terminal tab in the new worktree")
+	return cmd
 }
 
 func newRemoveCmd() *cobra.Command {
