@@ -54,6 +54,7 @@ wt open <branch|path>   # print the worktree path (wrapper cd's into it)
 wt open <branch> --tab  # open a new terminal tab there instead
 wt status [branch]      # detailed status for one or all worktrees
 wt remove <branch>      # remove a worktree (rm alias; -f to force)
+wt remove <branch> -b   # ...and delete its branch (-B to force if unmerged)
 wt terminals            # list terminal adapters and which is detected
 wt config init          # create a config file interactively
 wt config path          # print the global config file path
@@ -112,7 +113,7 @@ Normal mode:
 | `a` | add a new worktree |
 | `o` | open in new terminal tab |
 | `tab` / `→` | action submenu |
-| `r` | remove (asks for confirmation) |
+| `r` | remove (`y` worktree · `b` worktree + branch · `n` cancel) |
 | `/` | search / filter |
 | `q` / `esc` | quit (`esc` first clears an active filter) |
 

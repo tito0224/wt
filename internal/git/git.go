@@ -4,6 +4,7 @@ package git
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,11 @@ import (
 	"strings"
 	"sync"
 )
+
+// ErrBranchNotMerged is returned by DeleteBranch when a safe (`-d`) delete is
+// refused because the branch has commits not merged into its upstream/HEAD.
+// Callers can offer a force delete (`-D`) in response. Test with errors.Is.
+var ErrBranchNotMerged = errors.New("git: branch not fully merged")
 
 // Worktree describes a single git worktree and its computed status.
 type Worktree struct {
@@ -34,21 +40,40 @@ type Worktree struct {
 	// Dirty is true when there are uncommitted changes (staged, unstaged,
 	// or untracked files) in the working tree.
 	Dirty bool
-	// Ahead is the number of commits this branch is ahead of its upstream.
+	// Ahead is the number of commits this branch is ahead of its upstream
+	// (i.e. local commits not yet pushed to its remote tracking branch).
 	Ahead int
 	// Behind is the number of commits this branch is behind its upstream.
 	Behind int
 	// HasUpstream reports whether the branch tracks a remote branch.
 	HasUpstream bool
-	// Unmerged is true when the branch has commits not merged into the
-	// repository's main/default branch.
-	Unmerged bool
+	// AheadOfBase is the number of commits reachable from this branch's HEAD
+	// but not from the repository's default branch (BaseBranch). This is a raw
+	// commit-reachability count: because squash/rebase merges rewrite history,
+	// a nonzero value does NOT by itself mean the work is unmerged — the merge
+	// status is resolved with forge (PR) data at a higher layer.
+	AheadOfBase int
+	// BaseBranch is the default branch AheadOfBase was measured against, with
+	// any remote prefix stripped (e.g. "master"). Empty when undetermined.
+	BaseBranch string
+	// BaseRef is the full ref AheadOfBase was measured against (e.g.
+	// "origin/master"), suitable for passing back to git. Empty when
+	// undetermined.
+	BaseRef string
 	// Current is true for the worktree the command was invoked from.
 	Current bool
 }
 
 // run executes a git command in the given directory and returns trimmed stdout.
 func run(dir string, args ...string) (string, error) {
+	out, err := runRaw(dir, args...)
+	return strings.TrimSpace(out), err
+}
+
+// runRaw is like run but does not trim surrounding whitespace, which matters
+// for output whose leading columns are significant (e.g. `status --porcelain`,
+// where a leading space is part of the XY status code).
+func runRaw(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	if dir != "" {
 		cmd.Dir = dir
@@ -60,7 +85,7 @@ func run(dir string, args ...string) (string, error) {
 		}
 		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return string(out), nil
 }
 
 // IsRepo reports whether dir is inside a git working tree.
@@ -77,25 +102,132 @@ type Commit struct {
 	Subject   string // first line of the commit message
 }
 
-// LastCommit returns details of the commit at HEAD in dir. The fields are
-// requested in a single git call, separated by NUL bytes so any field may
-// contain arbitrary text (including the "|" that a naive format would break on).
-func LastCommit(dir string) (Commit, error) {
-	const fmtStr = "%h%x00%an%x00%cr%x00%s"
-	out, err := run(dir, "log", "-1", "--no-color", "--format="+fmtStr)
-	if err != nil {
-		return Commit{}, err
-	}
-	parts := strings.Split(out, "\x00")
+// commitFormat requests a commit's fields separated by NUL bytes (%x00) so any
+// field may contain arbitrary text. Records are separated by a record
+// separator (%x1e) when logging multiple commits.
+const commitFormat = "%h%x00%an%x00%cr%x00%s"
+
+// parseCommit parses a single NUL-separated commit record.
+func parseCommit(rec string) (Commit, bool) {
+	parts := strings.Split(rec, "\x00")
 	if len(parts) < 4 {
-		return Commit{}, fmt.Errorf("unexpected git log output")
+		return Commit{}, false
 	}
 	return Commit{
 		ShortHash: parts[0],
 		Author:    parts[1],
 		RelDate:   parts[2],
 		Subject:   parts[3],
-	}, nil
+	}, true
+}
+
+// LastCommit returns details of the commit at HEAD in dir.
+func LastCommit(dir string) (Commit, error) {
+	out, err := run(dir, "log", "-1", "--no-color", "--format="+commitFormat)
+	if err != nil {
+		return Commit{}, err
+	}
+	c, ok := parseCommit(out)
+	if !ok {
+		return Commit{}, fmt.Errorf("unexpected git log output")
+	}
+	return c, nil
+}
+
+// FileChange describes one changed path from `git status --porcelain`.
+type FileChange struct {
+	// Code is the two-character XY status (e.g. " M", "A ", "??"), where X is
+	// the staged (index) state and Y the unstaged (worktree) state.
+	Code string
+	Path string
+}
+
+// WorktreeStatus summarizes the working-tree state of dir.
+type WorktreeStatus struct {
+	Staged    int // paths with an index change (X is not ' ' or '?')
+	Modified  int // paths with an unstaged change (Y is not ' ' or '?')
+	Untracked int // paths not tracked ("??")
+	Files     []FileChange
+}
+
+// Clean reports whether there are no changes at all.
+func (s WorktreeStatus) Clean() bool { return len(s.Files) == 0 }
+
+// Status parses `git status --porcelain` for dir into per-category counts and
+// the list of changed files (in git's order).
+func Status(dir string) (WorktreeStatus, error) {
+	// Use runRaw: the leading space in a status code (e.g. " M") is significant
+	// and must not be trimmed away from the first line.
+	out, err := runRaw(dir, "status", "--porcelain")
+	if err != nil {
+		return WorktreeStatus{}, err
+	}
+	var s WorktreeStatus
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		// Porcelain v1: "XY <path>" — X (index) and Y (worktree) status, a
+		// separator space, then the path starting at column 3.
+		code := line[:2]
+		path := line[3:]
+		s.Files = append(s.Files, FileChange{Code: code, Path: path})
+
+		switch {
+		case code == "??":
+			s.Untracked++
+		default:
+			if code[0] != ' ' {
+				s.Staged++
+			}
+			if code[1] != ' ' {
+				s.Modified++
+			}
+		}
+	}
+	return s, nil
+}
+
+// CommitsAfter counts commits reachable from HEAD but not from base whose
+// commit time is strictly after the given RFC3339 timestamp. It is used to
+// detect commits pushed to a branch after its PR merged (which git's plain
+// commit-reachability count cannot distinguish, since squash/rebase merges
+// rewrite SHAs). A zero base skips the base exclusion.
+func CommitsAfter(dir, base, sinceRFC3339 string) (int, error) {
+	if sinceRFC3339 == "" {
+		return 0, nil
+	}
+	rangeSpec := "HEAD"
+	if base != "" {
+		rangeSpec = base + "..HEAD"
+	}
+	// --since filters by commit date; count the resulting commits.
+	out, err := run(dir, "rev-list", "--count", "--since="+sinceRFC3339, rangeSpec)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := strconv.Atoi(out)
+	return n, nil
+}
+
+// RecentCommits returns up to n commits from HEAD in dir, most recent first.
+func RecentCommits(dir string, n int) ([]Commit, error) {
+	out, err := run(dir, "log", fmt.Sprintf("-%d", n), "--no-color",
+		"--format="+commitFormat+"%x1e")
+	if err != nil {
+		return nil, err
+	}
+	var commits []Commit
+	for _, rec := range strings.Split(out, "\x1e") {
+		rec = strings.Trim(rec, "\n")
+		if rec == "" {
+			continue
+		}
+		if c, ok := parseCommit(rec); ok {
+			commits = append(commits, c)
+		}
+	}
+	return commits, nil
 }
 
 // TopLevel returns the absolute path to the root of the working tree
@@ -282,12 +414,14 @@ func enrich(w *Worktree, base string) {
 		}
 	}
 
-	// Unmerged: does this branch have commits not in the default branch?
+	// Commits ahead of the default branch (raw reachability count). This does
+	// not distinguish squash/rebase-merged work; callers combine it with PR
+	// state to decide whether the branch is actually merged.
 	if base != "" && w.Branch != "" && w.Branch != stripRemote(base) {
+		w.BaseBranch = stripRemote(base)
+		w.BaseRef = base
 		if out, err := run(w.Path, "rev-list", "--count", base+"..HEAD"); err == nil {
-			if n, _ := strconv.Atoi(out); n > 0 {
-				w.Unmerged = true
-			}
+			w.AheadOfBase, _ = strconv.Atoi(out)
 		}
 	}
 }
@@ -309,6 +443,25 @@ func Remove(dir, path string, force bool) error {
 	}
 	args = append(args, path)
 	_, err := run(dir, args...)
+	return err
+}
+
+// DeleteBranch deletes a local branch. When force is false it uses `git branch
+// -d` (which refuses to delete branches not merged into their upstream/HEAD);
+// when true it uses `-D` (unconditional). The command runs in dir, which must
+// be a worktree other than the branch's own (git refuses to delete a branch
+// that is checked out anywhere).
+func DeleteBranch(dir, branch string, force bool) error {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	_, err := run(dir, "branch", flag, branch)
+	if err != nil && strings.Contains(err.Error(), "not fully merged") {
+		// Wrap so callers can detect the refusal with errors.Is while still
+		// seeing git's original message via %w.
+		return fmt.Errorf("%w: %v", ErrBranchNotMerged, err)
+	}
 	return err
 }
 

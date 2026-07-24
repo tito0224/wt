@@ -5,8 +5,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/johnlotito/wt/internal/config"
 	"github.com/johnlotito/wt/internal/git"
+	"github.com/johnlotito/wt/internal/ops"
 	"github.com/johnlotito/wt/internal/terminal"
 	"github.com/spf13/cobra"
 )
@@ -99,12 +99,14 @@ func newStatusCmd() *cobra.Command {
 				fmt.Printf("  path:      %s\n", w.Path)
 				if !w.Bare {
 					fmt.Printf("  dirty:     %t\n", w.Dirty)
-					fmt.Printf("  unmerged:  %t\n", w.Unmerged)
 					if w.HasUpstream {
-						fmt.Printf("  ahead:     %d\n", w.Ahead)
+						fmt.Printf("  unpushed:  %d\n", w.Ahead)
 						fmt.Printf("  behind:    %d\n", w.Behind)
 					} else {
-						fmt.Printf("  upstream:  (none)\n")
+						fmt.Printf("  upstream:  (not pushed)\n")
+					}
+					if w.BaseBranch != "" {
+						fmt.Printf("  ahead of %s: %d\n", w.BaseBranch, w.AheadOfBase)
 					}
 				}
 				fmt.Println()
@@ -139,7 +141,7 @@ func newAddCmd() *cobra.Command {
 				return err
 			}
 
-			branch, path, err := config.CreateWorktree(top, name, base, dir)
+			branch, path, err := ops.AddWorktree(top, name, base, dir)
 			if err != nil {
 				return err
 			}
@@ -162,7 +164,11 @@ func newAddCmd() *cobra.Command {
 }
 
 func newRemoveCmd() *cobra.Command {
-	var force bool
+	var (
+		force        bool
+		deleteBranch bool
+		forceBranch  bool
+	)
 	cmd := &cobra.Command{
 		Use:     "remove <branch-or-path>",
 		Aliases: []string{"rm"},
@@ -177,16 +183,29 @@ func newRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if wt.Bare {
-				return fmt.Errorf("refusing to remove the bare repository")
-			}
-			if err := git.Remove(dir, wt.Path, force); err != nil {
+
+			res, err := ops.RemoveWorktree(dir, *wt, ops.RemoveOptions{
+				Force:        force,
+				DeleteBranch: deleteBranch,
+				ForceBranch:  forceBranch,
+			})
+			if err != nil {
 				return err
 			}
 			fmt.Printf("removed %s (%s)\n", wt.Label(), wt.Path)
+
+			switch {
+			case res.BranchDeleted:
+				fmt.Printf("deleted branch %s\n", res.Branch)
+			case res.BranchUnmerged:
+				fmt.Printf("branch %s is not fully merged; not deleted "+
+					"(use -B to force-delete)\n", res.Branch)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "discard uncommitted changes when removing")
+	cmd.Flags().BoolVarP(&deleteBranch, "delete-branch", "b", false, "also delete the branch (safe; refuses if unmerged)")
+	cmd.Flags().BoolVarP(&forceBranch, "force-delete-branch", "B", false, "also delete the branch, even if unmerged")
 	return cmd
 }

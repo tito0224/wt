@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -45,23 +46,42 @@ func (m *model) handleDetailDebounce(msg detailDebounceMsg) (tea.Model, tea.Cmd)
 	if _, ok := m.details[wt.Path]; ok {
 		return m, nil
 	}
-	return m, loadDetailCmd(m.detailGen, wt.Path, wt.Branch)
+	return m, loadDetailCmd(m.detailGen, wt.Path, wt.Branch, wt.BaseRef)
 }
 
-// loadDetailCmd fetches the last commit and (best-effort) the PR for a
+// detailLogCount is how many recent commits to load for the detail screen. The
+// status bar uses only the first (HEAD).
+const detailLogCount = 5
+
+// loadDetailCmd fetches the recent commit log and (best-effort) the PR for a
 // worktree off the main loop. The forge lookup is cached in the forge package,
 // so re-selecting a worktree in a later session's first hit is the only slow one.
-func loadDetailCmd(gen int, path, branch string) tea.Cmd {
+func loadDetailCmd(gen int, path, branch, baseRef string) tea.Cmd {
 	return func() tea.Msg {
 		var d detail
-		if c, err := git.LastCommit(path); err != nil {
+		if commits, err := git.RecentCommits(path, detailLogCount); err != nil {
 			d.commitErr = err
 		} else {
-			d.commit = c
+			d.commits = commits
 		}
-		if pr, found := forge.LookupPR(path, branch); found {
-			d.pr = pr
+		if st, err := git.Status(path); err != nil {
+			d.statusErr = err
+		} else {
+			d.status = st
+		}
+		// A PR, a definitive "no PR" (ErrNoPR), or a transient failure. Only
+		// mark prChecked on a definitive answer so a failed lookup can retry.
+		if pr, err := forge.LookupPR(path, branch); err == nil {
 			d.prChecked = true
+			d.pr = pr
+			if pr.State == "MERGED" && pr.MergedAt != "" {
+				// Detect commits pushed after the merge (real unmerged work).
+				// Uses commit dates because squash/rebase merges rewrite SHAs,
+				// so reachability alone can't tell them apart.
+				d.postMerge, _ = git.CommitsAfter(path, baseRef, pr.MergedAt)
+			}
+		} else if errors.Is(err, forge.ErrNoPR) {
+			d.prChecked = true // definitively no PR
 		}
 		return detailResultMsg{gen: gen, path: path, detail: d}
 	}

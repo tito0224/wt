@@ -31,7 +31,9 @@ func (w Worktree) DisplayLabel() string {
 }
 
 // StatusTags returns short human-readable status markers, e.g. ["dirty",
-// "unmerged", "↑2", "↓1"].
+// "↑2", "↓1", "↥3"]. The ↑/↓ markers are ahead/behind the branch's own
+// upstream; ↥ is commits ahead of the default branch (see AheadOfBase — a
+// neutral count, not a claim that the work is unmerged).
 func (w Worktree) StatusTags() []string {
 	if w.Bare {
 		return nil
@@ -42,14 +44,14 @@ func (w Worktree) StatusTags() []string {
 	} else {
 		tags = append(tags, "clean")
 	}
-	if w.Unmerged {
-		tags = append(tags, "unmerged")
-	}
 	if w.Ahead > 0 {
 		tags = append(tags, fmt.Sprintf("↑%d", w.Ahead))
 	}
 	if w.Behind > 0 {
 		tags = append(tags, fmt.Sprintf("↓%d", w.Behind))
+	}
+	if w.AheadOfBase > 0 {
+		tags = append(tags, fmt.Sprintf("↥%d", w.AheadOfBase))
 	}
 	if w.Locked {
 		tags = append(tags, "locked")

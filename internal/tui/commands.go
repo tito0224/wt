@@ -2,13 +2,18 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/johnlotito/wt/internal/config"
 	"github.com/johnlotito/wt/internal/git"
+	"github.com/johnlotito/wt/internal/ops"
 	"github.com/johnlotito/wt/internal/terminal"
 )
+
+// execDoneMsg is delivered after a suspended external process (diff/difftool)
+// returns and the TUI has resumed.
+type execDoneMsg struct{ err error }
 
 // loadCmd enumerates worktrees off the main loop, delivering loadResultMsg.
 func loadCmd(dir string) tea.Cmd {
@@ -31,9 +36,9 @@ func (m *model) handleLoadResult(msg loadResultMsg) (tea.Model, tea.Cmd) {
 	return m, m.scheduleDetail()
 }
 
-// runAction dispatches a selection-based action (from the list or the action
-// submenu). "cd"/"status" quit and hand a result back to Run; "open" launches a
-// terminal tab; "remove" opens the confirmation prompt.
+// runAction dispatches a keybar action for the selected worktree. "cd" quits
+// and hands the path back to Run; "open" launches a terminal tab; "openpr"
+// opens the PR in a browser; "remove" opens the confirmation prompt.
 func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 	wt := m.selected()
 	if wt == nil {
@@ -44,25 +49,47 @@ func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 		adapter, err := terminal.Resolve(m.terminalName)
 		if err != nil {
 			m.setErr(err.Error())
-			m.view = viewList
 			return m, nil
 		}
 		if err := adapter.OpenTab(wt.Path); err != nil {
 			m.setErr(err.Error())
-			m.view = viewList
 			return m, nil
 		}
 		m.setMsg(fmt.Sprintf("opened %s in new %s tab", wt.Label(), adapter.Name()))
-		m.view = viewList
-	case "cd", "status":
+	case "openpr":
+		pr := m.selectedPR()
+		if pr == nil {
+			m.setErr("no pull request for this worktree")
+			return m, nil
+		}
+		if err := openURL(pr.URL); err != nil {
+			m.setErr(err.Error())
+			return m, nil
+		}
+		m.setMsg(fmt.Sprintf("opened PR #%d in browser", pr.Number))
+	case "diff", "difftool":
+		// git diff/difftool are interactive (pager or GUI tool). Suspend the
+		// TUI, run in the worktree, and resume when it exits.
+		if wt.Dirty {
+			sub := "diff"
+			if id == "difftool" {
+				sub = "difftool"
+			}
+			c := exec.Command("git", "-C", wt.Path, sub)
+			return m, tea.ExecProcess(c, func(err error) tea.Msg {
+				return execDoneMsg{err: err}
+			})
+		}
+		m.setMsg("no uncommitted changes to diff")
+		return m, nil
+	case "cd":
 		m.resultAction = id
 		m.resultWT = wt
 		return m, tea.Quit
 	case "remove":
 		// Ask for confirmation before a destructive removal (especially since
 		// dirty worktrees are force-removed).
-		m.view = viewList
-		m.menu.confirm = "remove"
+		m.list.confirm = "remove"
 		return m, nil
 	}
 	return m, nil
@@ -87,7 +114,7 @@ func (m *model) doCreate() (tea.Model, tea.Cmd) {
 		if err != nil {
 			return createResultMsg{err: err}
 		}
-		branch, path, err := config.CreateWorktree(top, name, "", "")
+		branch, path, err := ops.AddWorktree(top, name, "", "")
 		if err != nil {
 			return createResultMsg{err: err}
 		}
@@ -118,32 +145,39 @@ func (m *model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 	return m, m.scheduleDetail()
 }
 
-// doRemove kicks off asynchronous worktree removal after confirmation. The
-// blocking git work runs in a tea.Cmd so the spinner can animate; completion
-// arrives as removeResultMsg.
-func (m *model) doRemove() (tea.Model, tea.Cmd) {
+// doRemove kicks off asynchronous worktree removal after confirmation. When
+// deleteBranch is set, it also deletes the branch (forcing when forceBranch is
+// set). The blocking git work runs in a tea.Cmd so the spinner can animate;
+// completion arrives as removeResultMsg.
+func (m *model) doRemove(deleteBranch, forceBranch bool) (tea.Model, tea.Cmd) {
 	wt := m.selected()
 	if wt == nil {
 		return m, nil
 	}
+	// Pre-flight the guards synchronously so we can report them without a
+	// spinner round-trip. (ops.RemoveWorktree re-checks them; this just gives a
+	// fast, inline error.)
 	if wt.Current {
-		m.setErr("refusing to remove the worktree you're currently in")
+		m.setErr(ops.ErrCurrent.Error())
 		return m, nil
 	}
-	force := wt.Dirty
+
 	label := wt.Label()
 	path := wt.Path
+	target := *wt
 	dir := m.dir
+	opts := ops.RemoveOptions{Force: wt.Dirty, DeleteBranch: deleteBranch, ForceBranch: forceBranch}
 
 	cmd := func() tea.Msg {
-		err := git.Remove(dir, path, force)
-		return removeResultMsg{label: label, path: path, force: force, err: err}
+		res, err := ops.RemoveWorktree(dir, target, opts)
+		return removeResultMsg{label: label, path: path, force: opts.Force, result: res, err: err}
 	}
 	return m, tea.Batch(m.startBusy(fmt.Sprintf("removing %s…", label)), cmd)
 }
 
-// handleRemoveResult applies the outcome of an async removal: on success it
-// drops the worktree from the list; on failure it surfaces the error.
+// handleRemoveResult applies the outcome of an async removal. On success it
+// drops the worktree from the list. If the worktree was removed but a requested
+// branch deletion was refused (unmerged), it prompts to force-delete.
 func (m *model) handleRemoveResult(msg removeResultMsg) (tea.Model, tea.Cmd) {
 	m.spinner.active = false
 	m.spinner.msg = ""
@@ -151,13 +185,58 @@ func (m *model) handleRemoveResult(msg removeResultMsg) (tea.Model, tea.Cmd) {
 		m.setErr(msg.err.Error())
 		return m, nil
 	}
+
 	note := ""
 	if msg.force {
 		note = " (forced, discarded changes)"
 	}
 	delete(m.details, msg.path)
 	m.removeFromAll(msg.path)
-	m.setMsg(fmt.Sprintf("removed %s%s", msg.label, note))
+	// Removal always returns to the list (e.g. when triggered from the detail
+	// screen, that worktree is gone, so its detail view no longer makes sense).
+	m.view = viewList
+
+	switch {
+	case msg.result.BranchUnmerged:
+		// Worktree gone, but the (safe) branch delete was refused because the
+		// branch is unmerged. Offer to force it.
+		m.pendingBranch = msg.result.Branch
+		m.list.confirm = "force-branch"
+		m.setMsg(fmt.Sprintf("removed %s%s; branch %s is unmerged", msg.label, note, msg.result.Branch))
+		return m, nil
+	case msg.result.BranchDeleted:
+		m.setMsg(fmt.Sprintf("removed %s%s and deleted branch %s", msg.label, note, msg.result.Branch))
+	default:
+		m.setMsg(fmt.Sprintf("removed %s%s", msg.label, note))
+	}
 	// The cursor now points at a different worktree; load its detail.
 	return m, m.scheduleDetail()
+}
+
+// doForceDeleteBranch force-deletes the branch left over after a removal whose
+// safe branch delete was refused.
+func (m *model) doForceDeleteBranch() (tea.Model, tea.Cmd) {
+	branch := m.pendingBranch
+	m.pendingBranch = ""
+	if branch == "" {
+		return m, nil
+	}
+	dir := m.dir
+	cmd := func() tea.Msg {
+		err := ops.DeleteBranch(dir, branch, true)
+		return branchDeleteResultMsg{branch: branch, err: err}
+	}
+	return m, tea.Batch(m.startBusy(fmt.Sprintf("deleting branch %s…", branch)), cmd)
+}
+
+// handleBranchDeleteResult reports the outcome of a forced branch deletion.
+func (m *model) handleBranchDeleteResult(msg branchDeleteResultMsg) (tea.Model, tea.Cmd) {
+	m.spinner.active = false
+	m.spinner.msg = ""
+	if msg.err != nil {
+		m.setErr(fmt.Sprintf("branch %s not deleted: %v", msg.branch, msg.err))
+	} else {
+		m.setMsg(fmt.Sprintf("deleted branch %s", msg.branch))
+	}
+	return m, nil
 }

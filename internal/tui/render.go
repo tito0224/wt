@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
@@ -229,7 +228,8 @@ func coloredStatus(w git.Worktree) string {
 		switch {
 		case t == "dirty":
 			parts[i] = dirtyStyle.Render(t)
-		case t == "unmerged":
+		case strings.HasPrefix(t, "↥"):
+			// commits ahead of the default branch
 			parts[i] = unmergedStyle.Render(t)
 		case t == "clean":
 			parts[i] = cleanStyle.Render(t)
@@ -275,16 +275,4 @@ func highlight(s string, matched []int) string {
 		}
 	}
 	return b.String()
-}
-
-// printStatus writes a worktree's detailed status to stdout (used when the
-// picker exits with the "status" action).
-func printStatus(w git.Worktree) {
-	fmt.Printf("%s\n  path:     %s\n", w.Label(), w.Path)
-	if !w.Bare {
-		fmt.Printf("  dirty:    %t\n  unmerged: %t\n", w.Dirty, w.Unmerged)
-		if w.HasUpstream {
-			fmt.Printf("  ahead:    %d\n  behind:   %d\n", w.Ahead, w.Behind)
-		}
-	}
 }

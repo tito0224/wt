@@ -11,7 +11,7 @@ func rowsFixture() []row {
 	wts := []git.Worktree{
 		{Path: "/home/u/projects/main", Branch: "main", Current: true, Dirty: false},
 		{Path: "/home/u/projects/a-really-quite-long-feature-branch-name-here", Branch: "a-really-quite-long-feature-branch-name-here", Ahead: 2, Behind: 1, Dirty: true, HasUpstream: true},
-		{Path: "/home/u/projects/fix", Branch: "fix", Unmerged: true},
+		{Path: "/home/u/projects/fix", Branch: "fix", AheadOfBase: 3, BaseBranch: "main"},
 	}
 	rs := make([]row, len(wts))
 	for i, w := range wts {
