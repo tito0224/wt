@@ -17,8 +17,12 @@ func (tmux) Name() string { return "tmux" }
 
 func (tmux) Detect() bool { return os.Getenv("TMUX") != "" }
 
-func (tmux) OpenTab(dir string) error {
-	cmd := exec.Command("tmux", "new-window", "-c", dir)
+func (tmux) OpenTab(dir string, command ...string) error {
+	args := []string{"new-window", "-c", dir}
+	// tmux runs the trailing args as the window's command (argv-style, no shell
+	// quoting needed); with no command it starts the default shell.
+	args = append(args, command...)
+	cmd := exec.Command("tmux", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux: %s", strings.TrimSpace(string(out)))
 	}

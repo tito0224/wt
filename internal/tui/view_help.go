@@ -17,6 +17,8 @@ var helpEntries = []helpEntry{
 	{"↵ enter", "cd current shell into the worktree"},
 	{"a", "add a new worktree"},
 	{"o", "open the worktree in a new terminal tab"},
+	{"e", "open in the default editor / agent"},
+	{"E", "choose an editor / agent to open (VS Code, Cursor, Zed, Claude, …)"},
 	{"p", "open the pull request in a browser"},
 	{"d", "git diff (uncommitted changes)"},
 	{"D", "git difftool"},

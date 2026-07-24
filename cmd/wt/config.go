@@ -61,6 +61,7 @@ func newConfigShowCmd() *cobra.Command {
 			fmt.Fprintf(w, "dir\t%s\n", orNone(c.Dir))
 			fmt.Fprintf(w, "branch_prefix\t%s\n", orNone(c.BranchPrefix))
 			fmt.Fprintf(w, "branch_separator\t%s\n", orNone(c.BranchSeparator))
+			fmt.Fprintf(w, "launch_default\t%s\n", orNone(cfg.Launch.Default))
 			return w.Flush()
 		},
 	}
@@ -170,6 +171,9 @@ func promptConfig(cfg *config.Config) error {
 	c.Dir = prompt(out, r, "Worktree dir (empty = ../<repo>-worktrees, supports {repo})", c.Dir)
 	c.BranchPrefix = prompt(out, r, "Branch prefix (empty = none)", c.BranchPrefix)
 	c.BranchSeparator = prompt(out, r, "Branch separator", sep)
+	cfg.Launch.Default = prompt(out, r,
+		"Default editor/agent for the 'e' key (e.g. code, cursor, zed, claude; empty = ask)",
+		cfg.Launch.Default)
 	return nil
 }
 

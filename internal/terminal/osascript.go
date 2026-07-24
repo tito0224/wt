@@ -11,6 +11,20 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// cdCommandLine builds a POSIX shell line that cds into dir and, when command
+// is non-empty, execs it there. Each argument is individually shell-quoted.
+func cdCommandLine(dir string, command []string) string {
+	line := "cd " + shellQuote(dir)
+	if len(command) > 0 {
+		parts := make([]string, len(command))
+		for i, a := range command {
+			parts[i] = shellQuote(a)
+		}
+		line += " && " + strings.Join(parts, " ")
+	}
+	return line
+}
+
 // osaQuote escapes a string for embedding in an AppleScript double-quoted
 // literal.
 func osaQuote(s string) string {

@@ -30,6 +30,7 @@ func (m *model) keyBarHints(v view, hasPR, dirty bool) []keyHint {
 	}
 	hints = append(hints,
 		keyHint{"o", "open", true},
+		keyHint{"e", "editor", true},
 		keyHint{"p", "PR", hasPR},
 		keyHint{"d", "diff", dirty},
 	)

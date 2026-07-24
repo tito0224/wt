@@ -12,8 +12,12 @@ by either `cd`-ing your current shell or opening a new terminal tab.
   (via the `gh` CLI, when installed).
 - `cd` your current shell into a worktree (via a shell wrapper), or open a new
   terminal tab.
+- Open a worktree in an editor or AI agent — VS Code, Cursor, Zed, Claude Code,
+  Copilot, Codex, Gemini, Opencode (CLI/web) — with `e` (default) / `E` (menu).
+  Only installed tools are shown; set a default via `launch.default` config.
 - Pluggable terminal adapters (iTerm2, Terminal.app, tmux, Ghostty, WezTerm).
 - Pluggable forge adapters for PR lookups (GitHub via `gh`).
+- Pluggable launcher adapters (editors/agents).
 
 ## Install
 
@@ -112,9 +116,12 @@ Normal mode:
 | `enter` | cd current shell into worktree |
 | `a` | add a worktree (new branch, or pick an existing one) |
 | `o` | open in new terminal tab |
-| `tab` / `→` | action submenu |
+| `e` | open in the default editor / agent |
+| `E` | choose an editor / agent to open |
+| `tab` / `→` / `l` | open the details screen |
 | `r` | remove (`y` worktree · `b` worktree + branch · `n` cancel) |
 | `/` | search / filter |
+| `?` | full key reference |
 | `q` / `esc` | quit (`esc` first clears an active filter) |
 
 Search mode (after `/`): type to filter; `enter` or `esc` returns to normal
