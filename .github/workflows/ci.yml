@@ -27,8 +27,28 @@ jobs:
       - name: Build
         run: go build ./...
 
-      - name: Vet
-        run: go vet ./...
+      - name: Test
+        # The git package's integration tests shell out to the real git
+        # binary; runners ship with git preinstalled, and the tests neutralize
+        # global/system config so they stay hermetic.
+        run: go test -race ./...
+
+  lint:
+    # Linting is platform-independent; one OS is enough.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        # Bundles staticcheck, govet, errcheck, unused, ineffassign (see
+        # .golangci.yml). Replaces a standalone `go vet` step.
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
 
       - name: gofmt
         run: |
@@ -39,8 +59,10 @@ jobs:
             exit 1
           fi
 
-      - name: Test
-        # The git package's integration tests shell out to the real git
-        # binary; runners ship with git preinstalled, and the tests neutralize
-        # global/system config so they stay hermetic.
-        run: go test -race ./...
+      - name: go mod tidy drift
+        run: go mod tidy -diff
+
+      - name: govulncheck
+        # Call-graph-aware vulnerability scan: fails only when our code
+        # actually reaches a vulnerable function, not on any dep advisory.
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

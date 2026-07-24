@@ -3,7 +3,6 @@
 package shell
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -161,10 +160,14 @@ func Install(shell string, dryRun bool) (*InstallResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	fmt.Fprintf(w, "\n%s", block)
-	if err := w.Flush(); err != nil {
+	if _, err := fmt.Fprintf(f, "\n%s", block); err != nil {
+		_ = f.Close() // best effort; the write error is the one worth reporting
+		return nil, err
+	}
+	// Close errors matter here: on many filesystems a failed write only
+	// surfaces at close, and claiming success while the rc file is truncated
+	// would leave the user with broken shell integration.
+	if err := f.Close(); err != nil {
 		return nil, err
 	}
 	res.Wrote = true
