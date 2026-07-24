@@ -45,14 +45,57 @@ Restart your shell afterwards.
 ```sh
 wt                      # interactive picker (see keys below)
 wt list                 # print worktrees + status (current marked with *)
+wt create <name>        # create a new worktree + branch (new/add aliases)
+wt create <name> --tab  # ...and open a new terminal tab in it
 wt open <branch|path>   # print the worktree path (wrapper cd's into it)
 wt open <branch> --tab  # open a new terminal tab there instead
 wt status [branch]      # detailed status for one or all worktrees
 wt remove <branch>      # remove a worktree (rm alias; -f to force)
 wt terminals            # list terminal adapters and which is detected
+wt config init          # create a config file interactively
+wt config path          # print the global config file path
+wt config show          # print the effective (layered) configuration
 ```
 
 Use `-C <dir>` to run as if started in another directory.
+
+### Creation defaults (config)
+
+`wt create` reads defaults for the base branch, target directory, and branch
+naming. Configuration is layered, later sources overriding earlier ones:
+
+1. built-in defaults
+2. global file: `$XDG_CONFIG_HOME/wt/config.toml` (falls back to
+   `~/.config/wt/config.toml`)
+3. per-repo file: `.wt.toml` at the repository root
+4. `WT_*` environment variables
+5. command-line flags (`--base`, `--into`)
+
+Run `wt config init` to create a config file. It prompts for each value and
+writes to the repo-local `.wt.toml` when inside a git repository, otherwise to
+the global file. Use `--global`/`--repo` to choose explicitly, `--yes` to skip
+prompts and write a commented template, and `--force` to overwrite.
+
+Example `config.toml` (or repo-local `.wt.toml`):
+
+```toml
+[create]
+# Branch/ref new worktrees are created from.
+# Empty = repo default branch (origin/HEAD, then main/master).
+base_branch = ""
+
+# Where worktrees are placed. Relative paths resolve against the repo root.
+# Supports the {repo} placeholder. The worktree name is appended.
+# Default: "../<repo>-worktrees"
+dir = "../{repo}-worktrees"
+
+# Branch name = prefix + separator + name (e.g. "jl" + "/" + "foo" -> jl/foo).
+branch_prefix = "jl"
+branch_separator = "/"
+```
+
+Environment equivalents: `WT_BASE_BRANCH`, `WT_DIR`, `WT_BRANCH_PREFIX`,
+`WT_BRANCH_SEPARATOR`.
 
 ### Interactive keys
 

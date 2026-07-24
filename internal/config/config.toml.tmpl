@@ -1,0 +1,16 @@
+# wt configuration
+# See `wt config show` for the effective, layered values.
+
+[create]
+# Branch/ref new worktrees are created from.
+# Empty = repo default branch (origin/HEAD, then main/master).
+base_branch = "{{ .BaseBranch }}"
+
+# Where worktrees are placed. Relative paths resolve against the repo
+# root. Supports the {repo} placeholder. The worktree name is appended.
+# Empty = "../<repo>-worktrees".
+dir = "{{ .Dir }}"
+
+# Branch name = prefix + separator + name (e.g. "jl" + "/" + "foo").
+branch_prefix = "{{ .BranchPrefix }}"
+branch_separator = "{{ .BranchSeparator }}"

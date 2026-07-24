@@ -7,10 +7,12 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/johnlotito/wt/internal/config"
 	"github.com/johnlotito/wt/internal/git"
 	"github.com/johnlotito/wt/internal/terminal"
 )
@@ -59,6 +61,7 @@ type view int
 const (
 	viewList view = iota
 	viewActions
+	viewCreate
 )
 
 type action struct {
@@ -72,6 +75,38 @@ var actions = []action{
 	{"o", "Open in new terminal tab", "open"},
 	{"s", "Show detailed status", "status"},
 	{"r", "Remove worktree", "remove"},
+}
+
+// spinnerFrames is a simple braille spinner animated via tea.Tick.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+const spinnerInterval = 80 * time.Millisecond
+
+// spinTickMsg advances the spinner animation.
+type spinTickMsg struct{}
+
+// loadResultMsg is delivered when the initial (or a refreshed) worktree
+// enumeration finishes.
+type loadResultMsg struct {
+	wts []git.Worktree
+	err error
+}
+
+// createResultMsg is delivered when an async worktree creation finishes. On
+// success it carries the refreshed worktree set and the new worktree's path.
+type createResultMsg struct {
+	branch string
+	path   string
+	wts    []git.Worktree
+	err    error
+}
+
+// removeResultMsg is delivered when an async worktree removal finishes.
+type removeResultMsg struct {
+	label string
+	path  string
+	force bool
+	err   error
 }
 
 // row is a worktree paired with its fuzzy-match metadata for the current
@@ -90,8 +125,19 @@ type model struct {
 	view      view
 	searching bool   // true while in search-input mode (entered with '/')
 	confirm   string // non-empty shows a y/n confirmation prompt for this action
+	createBuf string // worktree name being typed in the create view
 	filter    string
 	rows      []row // filtered view of `all`
+
+	// busy tracks an in-flight async git operation (create/remove). While
+	// busy, input is ignored and a spinner animates. busyMsg labels it.
+	busy      bool
+	busyMsg   string
+	spinFrame int
+
+	// loading is true during the initial worktree enumeration, before the
+	// first loadResultMsg arrives.
+	loading bool
 	cursor    int   // index into rows
 	offset    int   // scroll offset (first visible row)
 	actionCur int
@@ -113,8 +159,15 @@ type model struct {
 // inside $(...) to capture the chosen path for `cd`; if the TUI drew to stdout
 // it would be swallowed by that capture and appear to hang. Only the final
 // selected path is written to real stdout, for the wrapper to consume.
-func Run(dir string, wts []git.Worktree, terminalName string) error {
-	m := &model{dir: dir, all: wts, terminalName: terminalName, width: 80, height: 24}
+func Run(dir string, terminalName string) error {
+	// Start empty and in the loading state; Init kicks off async enumeration.
+	m := &model{
+		dir:          dir,
+		terminalName: terminalName,
+		width:        80,
+		height:       24,
+		loading:      true,
+	}
 	m.recompute()
 
 	opts := []tea.ProgramOption{tea.WithAltScreen()}
@@ -149,7 +202,33 @@ func Run(dir string, wts []git.Worktree, terminalName string) error {
 	return nil
 }
 
-func (m *model) Init() tea.Cmd { return nil }
+func (m *model) Init() tea.Cmd {
+	// Begin animating the spinner and enumerating worktrees concurrently.
+	return tea.Batch(spinTick(), loadCmd(m.dir))
+}
+
+// loadCmd enumerates worktrees off the main loop, delivering loadResultMsg.
+func loadCmd(dir string) tea.Cmd {
+	return func() tea.Msg {
+		wts, err := git.List(dir)
+		return loadResultMsg{wts: wts, err: err}
+	}
+}
+
+// spinTick schedules the next spinner animation frame.
+func spinTick() tea.Cmd {
+	return tea.Tick(spinnerInterval, func(time.Time) tea.Msg { return spinTickMsg{} })
+}
+
+// startBusy puts the model into the busy state with the given label and
+// returns the command that begins animating the spinner.
+func (m *model) startBusy(label string) tea.Cmd {
+	m.busy = true
+	m.busyMsg = label
+	m.spinFrame = 0
+	m.message = ""
+	return spinTick()
+}
 
 // recompute rebuilds the filtered rows from the current filter. Rows keep
 // git's native order (repo root first, as git lists it). When a filter is
@@ -230,9 +309,35 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Force a full repaint so shrinking the terminal can't leave stale
 		// lines from the previous (taller/wider) frame on screen.
 		return m, tea.ClearScreen
+	case spinTickMsg:
+		// Keep animating only while some git operation is still in flight.
+		if !m.busy && !m.loading {
+			return m, nil
+		}
+		m.spinFrame = (m.spinFrame + 1) % len(spinnerFrames)
+		return m, spinTick()
+	case loadResultMsg:
+		return m.handleLoadResult(msg)
+	case createResultMsg:
+		return m.handleCreateResult(msg)
+	case removeResultMsg:
+		return m.handleRemoveResult(msg)
 	case tea.KeyMsg:
+		// While loading or a git operation is running, swallow input except
+		// Ctrl-C so the spinner isn't interrupted and no conflicting action
+		// starts.
+		if m.busy || m.loading {
+			if msg.Type == tea.KeyCtrlC {
+				m.quit = true
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		if m.confirm != "" {
 			return m.updateConfirm(msg)
+		}
+		if m.view == viewCreate {
+			return m.updateCreate(msg)
 		}
 		if m.view == viewActions {
 			return m.updateActions(msg)
@@ -335,6 +440,10 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampScroll()
 		case "o":
 			return m.runAction("open")
+		case "n":
+			m.view = viewCreate
+			m.createBuf = ""
+			m.message = ""
 		case "a":
 			if m.selected() != nil {
 				m.view = viewActions
@@ -431,6 +540,109 @@ func (m *model) updateActions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateCreate handles the worktree-name input view.
+func (m *model) updateCreate(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC:
+		m.quit = true
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.view = viewList
+		m.createBuf = ""
+		return m, nil
+	case tea.KeyEnter:
+		return m.doCreate()
+	case tea.KeyBackspace:
+		if m.createBuf != "" {
+			r := []rune(m.createBuf)
+			m.createBuf = string(r[:len(r)-1])
+		}
+		return m, nil
+	case tea.KeyRunes, tea.KeySpace:
+		if key.Type == tea.KeySpace {
+			m.createBuf += " "
+		} else {
+			m.createBuf += string(key.Runes)
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// doCreate kicks off asynchronous worktree creation from the typed name using
+// config defaults. The blocking git work runs in a tea.Cmd so the UI keeps
+// repainting (spinner) while it happens; completion arrives as createResultMsg.
+func (m *model) doCreate() (tea.Model, tea.Cmd) {
+	name := strings.TrimSpace(m.createBuf)
+	if name == "" {
+		m.setErr("worktree name required")
+		return m, nil
+	}
+
+	m.view = viewList
+	m.createBuf = ""
+	dir := m.dir
+
+	cmd := func() tea.Msg {
+		top, err := git.TopLevel(dir)
+		if err != nil {
+			return createResultMsg{err: err}
+		}
+		branch, path, err := config.CreateWorktree(top, name, "", "")
+		if err != nil {
+			return createResultMsg{err: err}
+		}
+		// Refresh from git so the new worktree is fully enriched (status, etc.).
+		wts, _ := git.List(top)
+		return createResultMsg{branch: branch, path: path, wts: wts}
+	}
+	return m, tea.Batch(m.startBusy(fmt.Sprintf("creating %s…", name)), cmd)
+}
+
+// handleLoadResult applies the outcome of the initial worktree enumeration.
+func (m *model) handleLoadResult(msg loadResultMsg) (tea.Model, tea.Cmd) {
+	m.loading = false
+	if msg.err != nil {
+		m.setErr(msg.err.Error())
+		return m, nil
+	}
+	m.all = msg.wts
+	m.recompute()
+	return m, nil
+}
+
+// handleCreateResult applies the outcome of an async creation: on success it
+// swaps in the refreshed worktree set, clears the filter, and highlights the
+// new worktree; on failure it surfaces the error.
+func (m *model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
+	m.busy = false
+	m.busyMsg = ""
+	if msg.err != nil {
+		m.setErr(msg.err.Error())
+		return m, nil
+	}
+	if msg.wts != nil {
+		m.all = msg.wts
+	}
+	m.filter = ""
+	m.recompute()
+	m.selectByPath(msg.path)
+	m.setMsg(fmt.Sprintf("created %s at %s", msg.branch, abbrevHome(msg.path)))
+	return m, nil
+}
+
+// selectByPath moves the cursor to the row whose worktree path matches, if
+// present, scrolling it into view.
+func (m *model) selectByPath(path string) {
+	for i := range m.rows {
+		if m.rows[i].wt.Path == path {
+			m.cursor = i
+			m.clampScroll()
+			return
+		}
+	}
+}
+
 func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 	wt := m.selected()
 	if wt == nil {
@@ -465,7 +677,9 @@ func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// doRemove performs the actual worktree removal after confirmation.
+// doRemove kicks off asynchronous worktree removal after confirmation. The
+// blocking git work runs in a tea.Cmd so the spinner can animate; completion
+// arrives as removeResultMsg.
 func (m *model) doRemove() (tea.Model, tea.Cmd) {
 	wt := m.selected()
 	if wt == nil {
@@ -476,16 +690,32 @@ func (m *model) doRemove() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	force := wt.Dirty
-	if err := git.Remove(m.dir, wt.Path, force); err != nil {
-		m.setErr(err.Error())
+	label := wt.Label()
+	path := wt.Path
+	dir := m.dir
+
+	cmd := func() tea.Msg {
+		err := git.Remove(dir, path, force)
+		return removeResultMsg{label: label, path: path, force: force, err: err}
+	}
+	return m, tea.Batch(m.startBusy(fmt.Sprintf("removing %s…", label)), cmd)
+}
+
+// handleRemoveResult applies the outcome of an async removal: on success it
+// drops the worktree from the list; on failure it surfaces the error.
+func (m *model) handleRemoveResult(msg removeResultMsg) (tea.Model, tea.Cmd) {
+	m.busy = false
+	m.busyMsg = ""
+	if msg.err != nil {
+		m.setErr(msg.err.Error())
 		return m, nil
 	}
 	note := ""
-	if force {
+	if msg.force {
 		note = " (forced, discarded changes)"
 	}
-	m.removeFromAll(wt.Path)
-	m.setMsg(fmt.Sprintf("removed %s%s", wt.Label(), note))
+	m.removeFromAll(msg.path)
+	m.setMsg(fmt.Sprintf("removed %s%s", msg.label, note))
 	return m, nil
 }
 
@@ -506,10 +736,16 @@ func (m *model) View() string {
 	if m.quit {
 		return ""
 	}
+	if m.loading {
+		return m.clampFrame(m.viewLoadingRender())
+	}
 	var raw string
-	if m.view == viewActions {
+	switch m.view {
+	case viewActions:
 		raw = m.viewActionsRender()
-	} else {
+	case viewCreate:
+		raw = m.viewCreateRender()
+	default:
 		raw = m.viewListRender()
 	}
 	return m.clampFrame(raw)
@@ -617,6 +853,16 @@ func (m *model) computeLayout() layout {
 	return l
 }
 
+// viewLoadingRender shows the spinner while the initial worktree enumeration
+// is in progress.
+func (m *model) viewLoadingRender() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("git worktrees") + "\n\n")
+	b.WriteString(titleStyle.Render(spinnerFrames[m.spinFrame]) + " " +
+		helpStyle.Render("loading worktrees…"))
+	return b.String()
+}
+
 func (m *model) viewListRender() string {
 	var b strings.Builder
 	lay := m.computeLayout()
@@ -684,7 +930,7 @@ func (m *model) viewListRender() string {
 	if m.searching {
 		help = "type to filter · enter/esc done"
 	} else {
-		help = "j/k move · enter cd · o open · a actions · r remove · / search · q quit"
+		help = "j/k move · enter cd · n new · o open · a actions · r remove · / search · q quit"
 	}
 	b.WriteString("\n" + m.footer(help))
 	return b.String()
@@ -706,8 +952,35 @@ func (m *model) viewActionsRender() string {
 	return b.String()
 }
 
+func (m *model) viewCreateRender() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("create worktree") + "\n\n")
+	b.WriteString(helpStyle.Render("name (base branch, dir & prefix come from config)") + "\n")
+	b.WriteString(filterStyle.Render(m.createBuf+"▏") + "\n")
+
+	// Preview the resulting branch/path when a name has been typed.
+	if name := strings.TrimSpace(m.createBuf); name != "" {
+		if top, err := git.TopLevel(m.dir); err == nil {
+			if cfg, err := config.Load(top); err == nil {
+				branch := cfg.Create.BranchName(name)
+				path := abbrevHome(cfg.Create.WorktreeDir(top, name))
+				b.WriteString("\n" + pathStyle.Render("→ "+branch+"  "+path) + "\n")
+			}
+		}
+	}
+
+	b.WriteString("\n" + m.footer("enter create · esc cancel"))
+	return b.String()
+}
+
 func (m *model) footer(help string) string {
 	var b strings.Builder
+	// While a git operation is in flight, the spinner + label replace the
+	// usual message/help line.
+	if m.busy {
+		b.WriteString(titleStyle.Render(spinnerFrames[m.spinFrame]) + " " + helpStyle.Render(m.busyMsg))
+		return b.String()
+	}
 	if m.message != "" {
 		if m.isErr {
 			b.WriteString(errorStyle.Render("✗ "+m.message) + "\n")
