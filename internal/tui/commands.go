@@ -27,7 +27,8 @@ func (m *model) handleLoadResult(msg loadResultMsg) (tea.Model, tea.Cmd) {
 	}
 	m.all = msg.wts
 	m.recompute()
-	return m, nil
+	// Load detail for the initially-selected worktree.
+	return m, m.scheduleDetail()
 }
 
 // runAction dispatches a selection-based action (from the list or the action
@@ -114,7 +115,7 @@ func (m *model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 	m.recompute()
 	m.selectByPath(msg.path)
 	m.setMsg(fmt.Sprintf("created %s at %s", msg.branch, abbrevHome(msg.path)))
-	return m, nil
+	return m, m.scheduleDetail()
 }
 
 // doRemove kicks off asynchronous worktree removal after confirmation. The
@@ -154,7 +155,9 @@ func (m *model) handleRemoveResult(msg removeResultMsg) (tea.Model, tea.Cmd) {
 	if msg.force {
 		note = " (forced, discarded changes)"
 	}
+	delete(m.details, msg.path)
 	m.removeFromAll(msg.path)
 	m.setMsg(fmt.Sprintf("removed %s%s", msg.label, note))
-	return m, nil
+	// The cursor now points at a different worktree; load its detail.
+	return m, m.scheduleDetail()
 }

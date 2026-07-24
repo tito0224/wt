@@ -195,12 +195,27 @@ func (m *model) viewListRender() string {
 		return b.String()
 	}
 
-	var help string
-	if m.list.searching {
-		help = "type to filter · enter/esc done"
-	} else {
-		help = "j/k move · enter cd · a add · o open · tab actions · r remove · / search · q quit"
+	// Status bar: async-loaded detail (last commit + PR) for the selection.
+	if sb := m.statusBar(); sb != "" {
+		b.WriteString("\n" + sb + "\n")
 	}
-	b.WriteString("\n" + m.footer(help))
+
+	// Footer: a transient message (or spinner) line, then the key bar.
+	b.WriteString("\n")
+	if m.spinner.active {
+		b.WriteString(titleStyle.Render(spinnerFrames[m.spinner.frame]) + " " +
+			helpStyle.Render(m.spinner.msg) + "\n")
+	} else if m.message != "" {
+		if m.isErr {
+			b.WriteString(errorStyle.Render("✗ "+m.message) + "\n")
+		} else {
+			b.WriteString(cleanStyle.Render("✓ "+m.message) + "\n")
+		}
+	}
+	if m.list.searching {
+		b.WriteString(helpStyle.Render("type to filter · enter/esc done"))
+	} else {
+		b.WriteString(renderKeyBar(listKeyHints))
+	}
 	return b.String()
 }

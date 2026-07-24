@@ -69,10 +69,49 @@ func IsRepo(dir string) bool {
 	return err == nil
 }
 
+// Commit describes the most recent commit on a worktree's HEAD.
+type Commit struct {
+	ShortHash string // abbreviated SHA (e.g. "a1b2c3d")
+	Author    string // author name
+	RelDate   string // human relative date (e.g. "3 days ago")
+	Subject   string // first line of the commit message
+}
+
+// LastCommit returns details of the commit at HEAD in dir. The fields are
+// requested in a single git call, separated by NUL bytes so any field may
+// contain arbitrary text (including the "|" that a naive format would break on).
+func LastCommit(dir string) (Commit, error) {
+	const fmtStr = "%h%x00%an%x00%cr%x00%s"
+	out, err := run(dir, "log", "-1", "--no-color", "--format="+fmtStr)
+	if err != nil {
+		return Commit{}, err
+	}
+	parts := strings.Split(out, "\x00")
+	if len(parts) < 4 {
+		return Commit{}, fmt.Errorf("unexpected git log output")
+	}
+	return Commit{
+		ShortHash: parts[0],
+		Author:    parts[1],
+		RelDate:   parts[2],
+		Subject:   parts[3],
+	}, nil
+}
+
 // TopLevel returns the absolute path to the root of the working tree
 // containing dir.
 func TopLevel(dir string) (string, error) {
 	return run(dir, "rev-parse", "--show-toplevel")
+}
+
+// RemoteURL returns the configured URL for the named remote (e.g. "origin"),
+// or an empty string when the remote is not configured.
+func RemoteURL(dir, name string) string {
+	out, err := run(dir, "remote", "get-url", name)
+	if err != nil {
+		return ""
+	}
+	return out
 }
 
 // DefaultBranch returns the repository's primary branch, preferring the remote

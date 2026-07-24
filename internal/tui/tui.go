@@ -19,6 +19,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/johnlotito/wt/internal/forge"
 	"github.com/johnlotito/wt/internal/git"
 )
 
@@ -52,6 +53,33 @@ type removeResultMsg struct {
 	path  string
 	force bool
 	err   error
+}
+
+// detailDebounceMsg fires after a short delay following a selection change. It
+// carries the generation it was scheduled for; if the selection has moved on
+// (gen advanced) it is ignored, so rapid j/k scrolling only loads the row the
+// user lands on.
+type detailDebounceMsg struct {
+	gen int
+}
+
+// detailResultMsg carries the loaded detail for a worktree. path identifies
+// which worktree it belongs to (the cursor may have moved); gen guards against
+// stale results.
+type detailResultMsg struct {
+	gen    int
+	path   string
+	detail detail
+}
+
+// detail holds the extra, lazily-loaded information shown in the status bar for
+// the highlighted worktree.
+type detail struct {
+	commit    git.Commit
+	commitErr error
+
+	pr        *forge.PR
+	prChecked bool // true once a forge lookup completed (found or definitively none)
 }
 
 // row is a worktree paired with its fuzzy-match metadata for the current
@@ -105,6 +133,12 @@ type model struct {
 	create  createState
 	spinner spinnerState
 
+	// details caches loaded status-bar info per worktree path. detailGen is
+	// bumped on every selection change to debounce and discard stale async
+	// loads (see detailDebounceMsg/detailResultMsg).
+	details   map[string]detail
+	detailGen int
+
 	cursor int // index into rows
 	offset int // scroll offset (first visible row)
 
@@ -133,6 +167,7 @@ func Run(dir string, terminalName string) error {
 		width:        80,
 		height:       24,
 		spinner:      spinnerState{loading: true},
+		details:      map[string]detail{},
 	}
 	m.recompute()
 
@@ -194,6 +229,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCreateResult(msg)
 	case removeResultMsg:
 		return m.handleRemoveResult(msg)
+	case detailDebounceMsg:
+		return m.handleDetailDebounce(msg)
+	case detailResultMsg:
+		return m.handleDetailResult(msg)
 	case tea.KeyMsg:
 		// While loading or a git operation is running, swallow input except
 		// Ctrl-C so the spinner isn't interrupted and no conflicting action
@@ -214,9 +253,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewActions {
 			return m.updateActions(msg)
 		}
-		return m.updateList(msg)
+		// Track the selected worktree across the key handler so a changed
+		// selection can (debounced) load its status-bar detail.
+		before := m.selectedPath()
+		newM, cmd := m.updateList(msg)
+		if mm, ok := newM.(*model); ok && mm.selectedPath() != before {
+			return mm, tea.Batch(cmd, mm.scheduleDetail())
+		}
+		return newM, cmd
 	}
 	return m, nil
+}
+
+// selectedPath returns the highlighted worktree's path, or "" when none.
+func (m *model) selectedPath() string {
+	if wt := m.selected(); wt != nil {
+		return wt.Path
+	}
+	return ""
 }
 
 func (m *model) View() string {
@@ -280,9 +334,15 @@ func (m *model) recompute() {
 }
 
 // visibleRows is how many table rows fit given the terminal height, reserving
-// space for title, header, filter line, and footer.
+// space for the surrounding chrome:
+//
+//	title(1) + filter(1) + header(1) + scroll(1)
+//	+ statusbar(blank + up to 3 lines = 4) + footer(blank + keybar = 2)
+//
+// which is 10 lines. When the terminal is very short, at least one row is shown.
 func (m *model) visibleRows() int {
-	n := m.height - 6
+	const chrome = 10
+	n := m.height - chrome
 	if n < 1 {
 		n = 1
 	}
