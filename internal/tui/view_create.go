@@ -39,7 +39,7 @@ func (m *model) updateCreate(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) viewCreateRender() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("create worktree") + "\n\n")
+	b.WriteString(titleStyle.Render("add worktree") + "\n\n")
 	b.WriteString(helpStyle.Render("name (base branch, dir & prefix come from config)") + "\n")
 	b.WriteString(filterStyle.Render(m.create.buf+"▏") + "\n")
 
@@ -54,6 +54,6 @@ func (m *model) viewCreateRender() string {
 		}
 	}
 
-	b.WriteString("\n" + m.footer("enter create · esc cancel"))
+	b.WriteString("\n" + m.footer("enter add · esc cancel"))
 	return b.String()
 }

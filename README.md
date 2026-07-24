@@ -45,8 +45,8 @@ Restart your shell afterwards.
 ```sh
 wt                      # interactive picker (see keys below)
 wt list                 # print worktrees + status (current marked with *)
-wt create <name>        # create a new worktree + branch (new/add aliases)
-wt create <name> --tab  # ...and open a new terminal tab in it
+wt add <name>           # add a new worktree + branch
+wt add <name> --tab     # ...and open a new terminal tab in it
 wt open <branch|path>   # print the worktree path (wrapper cd's into it)
 wt open <branch> --tab  # open a new terminal tab there instead
 wt status [branch]      # detailed status for one or all worktrees
@@ -61,7 +61,7 @@ Use `-C <dir>` to run as if started in another directory.
 
 ### Creation defaults (config)
 
-`wt create` reads defaults for the base branch, target directory, and branch
+`wt add` reads defaults for the base branch, target directory, and branch
 naming. Configuration is layered, later sources overriding earlier ones:
 
 1. built-in defaults
@@ -106,8 +106,9 @@ Normal mode:
 | `j` / `k` / arrows | move |
 | `g` / `G` | jump to top / bottom |
 | `enter` | cd current shell into worktree |
+| `a` | add a new worktree |
 | `o` | open in new terminal tab |
-| `a` / `tab` | action submenu |
+| `tab` / `→` | action submenu |
 | `r` | remove (asks for confirmation) |
 | `/` | search / filter |
 | `q` / `esc` | quit (`esc` first clears an active filter) |

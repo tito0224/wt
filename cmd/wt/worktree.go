@@ -114,17 +114,16 @@ func newStatusCmd() *cobra.Command {
 	}
 }
 
-func newCreateCmd() *cobra.Command {
+func newAddCmd() *cobra.Command {
 	var (
 		base string
 		dir  string
 		tab  bool
 	)
 	cmd := &cobra.Command{
-		Use:     "create <name>",
-		Aliases: []string{"new", "add"},
-		Short:   "Create a new worktree",
-		Long: "Create a new worktree and branch for <name>.\n\n" +
+		Use:   "add <name>",
+		Short: "Add a new worktree",
+		Long: "Add a new worktree and branch for <name>.\n\n" +
 			"Defaults for the base branch, target directory, and branch naming " +
 			"come from the wt config file (see `wt config path`), and can be " +
 			"overridden per-invocation with flags.",
