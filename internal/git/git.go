@@ -224,8 +224,8 @@ func Status(dir string) (WorktreeStatus, error) {
 		}
 		s.Files = append(s.Files, FileChange{Code: code, Path: path})
 
-		switch {
-		case code == "??":
+		switch code {
+		case "??":
 			s.Untracked++
 		default:
 			if code[0] != ' ' {
