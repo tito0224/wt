@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu for speed; macos because it is the tool's primary target
+        # (terminal adapters, .bash_profile handling, app-bundle detection).
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "files need gofmt:" >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+      - name: Test
+        # The git package's integration tests shell out to the real git
+        # binary; runners ship with git preinstalled, and the tests neutralize
+        # global/system config so they stay hermetic.
+        run: go test -race ./...
