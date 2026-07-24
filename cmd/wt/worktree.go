@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/johnlotito/wt/internal/config"
@@ -11,42 +10,6 @@ import (
 	"github.com/johnlotito/wt/internal/terminal"
 	"github.com/spf13/cobra"
 )
-
-// loadWorktrees resolves the repo dir and returns its worktrees.
-func loadWorktrees() (string, []git.Worktree, error) {
-	dir := repoDir()
-	if !git.IsRepo(dir) {
-		return "", nil, fmt.Errorf("%s is not a git repository", dir)
-	}
-	wts, err := git.List(dir)
-	return dir, wts, err
-}
-
-// findWorktree matches a worktree by branch name or path substring.
-func findWorktree(wts []git.Worktree, query string) (*git.Worktree, error) {
-	var matches []*git.Worktree
-	for i := range wts {
-		w := &wts[i]
-		if w.Branch == query || w.Path == query {
-			return w, nil // exact match wins
-		}
-		if strings.Contains(w.Branch, query) || strings.Contains(w.Path, query) {
-			matches = append(matches, w)
-		}
-	}
-	switch len(matches) {
-	case 0:
-		return nil, fmt.Errorf("no worktree matching %q", query)
-	case 1:
-		return matches[0], nil
-	default:
-		names := make([]string, len(matches))
-		for i, m := range matches {
-			names[i] = m.Label()
-		}
-		return nil, fmt.Errorf("%q is ambiguous: %s", query, strings.Join(names, ", "))
-	}
-}
 
 func newListCmd() *cobra.Command {
 	var porcelain bool

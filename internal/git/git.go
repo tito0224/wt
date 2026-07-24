@@ -96,9 +96,9 @@ func defaultBranch(dir string) string {
 	return ""
 }
 
-// List returns all worktrees for the repository containing dir, with their
-// status fields populated.
-func List(dir string) ([]Worktree, error) {
+// ListWorktrees returns all worktrees for the repository containing dir, with
+// their status fields populated.
+func ListWorktrees(dir string) ([]Worktree, error) {
 	out, err := run(dir, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err

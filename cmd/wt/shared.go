@@ -1,0 +1,72 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/johnlotito/wt/internal/git"
+)
+
+// Persistent flags shared across all commands, registered on the root command.
+var (
+	flagTerminal string
+	flagDir      string
+)
+
+// repoDir returns the directory wt should operate in: the --dir/-C override if
+// set, otherwise the current working directory.
+func repoDir() string {
+	if flagDir != "" {
+		return flagDir
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return wd
+}
+
+// loadWorktrees resolves the repo dir and returns its worktrees.
+func loadWorktrees() (string, []git.Worktree, error) {
+	dir := repoDir()
+	if !git.IsRepo(dir) {
+		return "", nil, fmt.Errorf("%s is not a git repository", dir)
+	}
+	wts, err := git.ListWorktrees(dir)
+	return dir, wts, err
+}
+
+// findWorktree matches a worktree by branch name or path substring.
+func findWorktree(wts []git.Worktree, query string) (*git.Worktree, error) {
+	var matches []*git.Worktree
+	for i := range wts {
+		w := &wts[i]
+		if w.Branch == query || w.Path == query {
+			return w, nil // exact match wins
+		}
+		if strings.Contains(w.Branch, query) || strings.Contains(w.Path, query) {
+			matches = append(matches, w)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("no worktree matching %q", query)
+	case 1:
+		return matches[0], nil
+	default:
+		names := make([]string, len(matches))
+		for i, m := range matches {
+			names[i] = m.Label()
+		}
+		return nil, fmt.Errorf("%q is ambiguous: %s", query, strings.Join(names, ", "))
+	}
+}
+
+// orNone renders an empty string as "(unset)" for display.
+func orNone(s string) string {
+	if s == "" {
+		return "(unset)"
+	}
+	return s
+}

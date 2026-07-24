@@ -210,7 +210,7 @@ func (m *model) Init() tea.Cmd {
 // loadCmd enumerates worktrees off the main loop, delivering loadResultMsg.
 func loadCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
-		wts, err := git.List(dir)
+		wts, err := git.ListWorktrees(dir)
 		return loadResultMsg{wts: wts, err: err}
 	}
 }
@@ -593,7 +593,7 @@ func (m *model) doCreate() (tea.Model, tea.Cmd) {
 			return createResultMsg{err: err}
 		}
 		// Refresh from git so the new worktree is fully enriched (status, etc.).
-		wts, _ := git.List(top)
+		wts, _ := git.ListWorktrees(top)
 		return createResultMsg{branch: branch, path: path, wts: wts}
 	}
 	return m, tea.Batch(m.startBusy(fmt.Sprintf("creating %s…", name)), cmd)
