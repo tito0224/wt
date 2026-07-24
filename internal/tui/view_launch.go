@@ -14,10 +14,15 @@ import (
 // single available launcher, otherwise it falls back to the picker so the user
 // can choose.
 func (m *model) quickLaunch() (tea.Model, tea.Cmd) {
-	wt := m.selected()
-	if wt == nil {
+	wt, ok := m.selected()
+	if !ok {
 		return m, nil
 	}
+	// Remember where the launch flow started (list or detail) so launching —
+	// or cancelling out of the fallback picker — lands back there, mirroring
+	// helpReturn. Launching never removes the worktree, so the origin view is
+	// always still valid.
+	m.launchReturn = m.view
 	items := launcher.Available()
 	if len(items) == 0 {
 		m.setErr("no editors or agents found (install code, cursor, zed, claude, or opencode)")
@@ -42,15 +47,25 @@ func (m *model) quickLaunch() (tea.Model, tea.Cmd) {
 // enterLaunch opens the launcher submenu for the selected worktree, listing the
 // available editors/agents. If none are installed it surfaces a message instead.
 func (m *model) enterLaunch() (tea.Model, tea.Cmd) {
-	wt := m.selected()
-	if wt == nil {
+	return m.enterLaunchWith(launcher.Available())
+}
+
+// enterLaunchWith is enterLaunch with an explicit launcher set — split out so
+// tests can inject fixtures instead of probing the host for installed editors.
+func (m *model) enterLaunchWith(items []launcher.Launcher) (tea.Model, tea.Cmd) {
+	wt, ok := m.selected()
+	if !ok {
 		return m, nil
 	}
-	items := launcher.Available()
 	if len(items) == 0 {
 		m.setErr("no editors or agents found (install code, cursor, zed, claude, or opencode)")
 		return m, nil
 	}
+	// Remember where the submenu was opened from (list or detail) so esc and
+	// launching return there, mirroring helpReturn. (When we got here via
+	// quickLaunch's fallback, m.view is still the origin view, so this is the
+	// same value quickLaunch recorded.)
+	m.launchReturn = m.view
 	m.launch = launchState{
 		items:   items,
 		wtPath:  wt.Path,
@@ -68,7 +83,7 @@ func (m *model) updateLaunch(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quit = true
 		return m, tea.Quit
 	case tea.KeyEsc, tea.KeyLeft:
-		m.view = viewList
+		m.view = m.launchReturn
 		return m, nil
 	case tea.KeyUp:
 		if m.launch.selectedRow > 0 {
@@ -93,7 +108,7 @@ func (m *model) updateLaunch(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.launch.selectedRow--
 			}
 		case "q":
-			m.view = viewList
+			m.view = m.launchReturn
 		}
 	}
 	return m, nil
@@ -109,10 +124,12 @@ func (m *model) doLaunch() (tea.Model, tea.Cmd) {
 }
 
 // launchInto runs launcher l for the worktree at path, then returns to the
-// list. Terminal-kind launchers open a new terminal tab via the resolved
-// terminal adapter; GUI/URL launchers run directly.
+// view the launch flow started from (list or detail — the worktree still
+// exists either way, so both success and error land back where the user was).
+// Terminal-kind launchers open a new terminal tab via the resolved terminal
+// adapter; GUI/URL launchers run directly.
 func (m *model) launchInto(l launcher.Launcher, path, label string) (tea.Model, tea.Cmd) {
-	m.view = viewList
+	m.view = m.launchReturn
 
 	var term terminal.Adapter
 	if l.Kind() == launcher.KindTerminal {

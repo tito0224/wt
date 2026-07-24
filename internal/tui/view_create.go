@@ -20,7 +20,23 @@ func (m *model) enterCreate() (tea.Model, tea.Cmd) {
 	in.Prompt = "" // the surrounding view provides framing
 	in.Placeholder = "new branch name"
 	focusCmd := in.Focus() // returns the cursor-blink command
-	m.create = createState{input: in}
+
+	// Resolve the repo root and config here, once, on entry — the render path
+	// needs them for the new-branch preview but repaints on every cursor blink,
+	// so it must not run a git subprocess or re-read config files per frame.
+	// A single quick synchronous git call on entry is acceptable. Failures
+	// leave top empty; the preview then simply shows less detail.
+	top := ""
+	if m.dir != "" {
+		if t, err := git.TopLevel(m.dir); err == nil {
+			top = t
+		}
+	}
+	var cfg config.Config
+	if top != "" {
+		cfg, _ = config.Load(top)
+	}
+	m.create = createState{input: in, top: top, cfg: cfg}
 
 	m.recomputeCreate()
 	return m, tea.Batch(loadBranchesCmd(m.dir), focusCmd)
@@ -142,17 +158,6 @@ func (m *model) viewCreateRender() string {
 	b.WriteString(helpStyle.Render("name a new branch, or pick an existing one") + "\n")
 	b.WriteString(m.create.input.View() + "\n\n")
 
-	top := ""
-	if m.dir != "" {
-		if t, err := git.TopLevel(m.dir); err == nil {
-			top = t
-		}
-	}
-	var cfg config.Config
-	if top != "" {
-		cfg, _ = config.Load(top)
-	}
-
 	// Show a window of rows around the cursor so a long branch list can't push
 	// the footer off screen. Reserve ~8 lines for title/help/input/footer.
 	vis := m.height - 8
@@ -172,7 +177,7 @@ func (m *model) viewCreateRender() string {
 	}
 	for i := start; i < end; i++ {
 		selected := i == m.create.selectedRow
-		b.WriteString(m.renderCreateRow(m.create.rows[i], selected, top, cfg) + "\n")
+		b.WriteString(m.renderCreateRow(m.create.rows[i], selected) + "\n")
 	}
 	if end < len(m.create.rows) {
 		b.WriteString(pathStyle.Render("  ↓ more") + "\n")
@@ -189,7 +194,9 @@ func (m *model) viewCreateRender() string {
 // renderCreateRow renders one row of the add screen. Selected rows are drawn in
 // reverse video with plain (uncolored) text so they stay readable on any theme,
 // mirroring the worktree list. In-use branches are dimmed and never selectable.
-func (m *model) renderCreateRow(row createRow, selected bool, top string, cfg config.Config) string {
+// The branch/path preview uses the top/cfg resolved in enterCreate — never
+// re-resolved here (this runs per frame).
+func (m *model) renderCreateRow(row createRow, selected bool) string {
 	// Build the plain (unstyled) text and, separately, the styled non-selected
 	// rendering.
 	if row.New {
@@ -199,8 +206,8 @@ func (m *model) renderCreateRow(row createRow, selected bool, top string, cfg co
 			plain = "＋ new branch (type a name)"
 			styled = helpStyle.Render(plain)
 		} else {
-			branch := cfg.Create.BranchName(name)
-			path := abbrevHome(cfg.Create.WorktreeDir(top, name))
+			branch := m.create.cfg.Create.BranchName(name)
+			path := abbrevHome(m.create.cfg.Create.WorktreeDir(m.create.top, name))
 			plain = "＋ new branch " + branch + "  " + path
 			styled = cleanStyle.Render("＋ new branch "+branch) + pathStyle.Render("  "+path)
 		}

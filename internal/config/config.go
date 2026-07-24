@@ -29,7 +29,8 @@ type Create struct {
 	BaseBranch string `toml:"base_branch"`
 	// Dir is the directory new worktrees are placed in. It may be absolute or
 	// relative to the repository root. When empty, "../<repo>-worktrees" is
-	// used. It supports the {repo} placeholder.
+	// used. It supports the {repo} placeholder. The worktree name is appended
+	// as a single flat directory (slashes in the name become '-'; see DirName).
 	Dir string `toml:"dir"`
 	// BranchPrefix is prepended to the worktree name to form the branch name,
 	// joined with BranchSeparator (e.g. prefix "jl", separator "/" -> jl/foo).
@@ -41,7 +42,9 @@ type Create struct {
 // Launch holds defaults for opening a worktree in an editor/agent.
 type Launch struct {
 	// Default is the launcher name (e.g. "code", "cursor", "claude") opened by
-	// the quick-launch key. When empty, the first available launcher is used.
+	// the quick-launch key. When empty (or not available), the quick-launch key
+	// uses the single available launcher if exactly one is installed, and
+	// otherwise opens the launcher picker.
 	Default string `toml:"default"`
 	// OpencodeWebURL is the origin (e.g. "http://localhost:4096") of an
 	// already-running `opencode web` server. When set, the "opencode-web"
@@ -169,10 +172,35 @@ func (c Create) BranchName(name string) string {
 	return c.BranchPrefix + sep + name
 }
 
+// DirName converts a worktree/branch name into the single path component used
+// as the worktree's directory name. Branch names may contain path separators
+// (a configured prefix like "jl/foo", or an existing branch like "feat/x");
+// using them verbatim would nest directories and, worse, let a name like
+// "../evil" escape the configured worktree dir entirely. Replacing separators
+// with '-' guarantees a flat, single-component name — at which point ".." is
+// only dangerous as the *whole* name, so the degenerate results ("", ".",
+// "..") are rejected.
+//
+// The mapping is deliberately minimal (no case folding, no stripping of dots
+// inside names like "v1.2"): predictability beats aggressive slugging.
+// Collisions are possible (branches "feat/x" and "feat-x" both map to
+// "feat-x"); creation then fails loudly with git's "already exists" error
+// rather than silently reusing the directory.
+func DirName(name string) (string, error) {
+	n := strings.TrimSpace(name)
+	n = strings.ReplaceAll(n, "/", "-")
+	n = strings.ReplaceAll(n, `\`, "-")
+	switch n {
+	case "", ".", "..":
+		return "", fmt.Errorf("invalid worktree name %q", name)
+	}
+	return n, nil
+}
+
 // WorktreeDir resolves the directory a new worktree named `name` should live
 // in, given the repository root. It expands the {repo} placeholder, resolves
-// relative paths against repoRoot, and appends the worktree name as the final
-// path element.
+// relative paths against repoRoot, and appends the worktree name — normalized
+// to a single flat path element via DirName — as the final component.
 func (c Create) WorktreeDir(repoRoot, name string) string {
 	repoName := filepath.Base(repoRoot)
 
@@ -185,7 +213,15 @@ func (c Create) WorktreeDir(repoRoot, name string) string {
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(repoRoot, dir)
 	}
-	return filepath.Join(dir, name)
+	component, err := DirName(name)
+	if err != nil {
+		// Degenerate names are rejected by ops before anything is created;
+		// this path only serves display (the add-screen path preview). Return
+		// the parent dir itself rather than joining "." or ".." (which would
+		// resolve to an escaped path).
+		return dir
+	}
+	return filepath.Join(dir, component)
 }
 
 // Render returns a commented TOML document for the given config, suitable for

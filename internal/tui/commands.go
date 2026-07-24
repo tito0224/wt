@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/johnlotito/wt/internal/browser"
 	"github.com/johnlotito/wt/internal/git"
 	"github.com/johnlotito/wt/internal/ops"
 	"github.com/johnlotito/wt/internal/terminal"
@@ -23,16 +24,39 @@ func loadCmd(dir string) tea.Cmd {
 	}
 }
 
-// handleLoadResult applies the outcome of the initial worktree enumeration.
+// startRefresh (the R key) reloads the worktree list and drops the whole
+// per-worktree detail cache — statuses and PRs go stale as the user works in
+// other terminals, and nothing else ever invalidates them mid-session. The
+// list stays on screen with the busy spinner (the full loading screen is
+// reserved for startup), and the cursor is restored to the same worktree once
+// the reload lands (see handleLoadResult).
+func (m *model) startRefresh() (tea.Model, tea.Cmd) {
+	m.pendingSelect = m.selectedPath()
+	m.details = map[string]detail{}
+	return m, tea.Batch(m.startBusy("refreshing…"), loadCmd(m.dir))
+}
+
+// handleLoadResult applies the outcome of a worktree enumeration — the initial
+// load (loading spinner) or a refresh (busy spinner); both are cleared here.
 func (m *model) handleLoadResult(msg loadResultMsg) (tea.Model, tea.Cmd) {
 	m.spinner.loading = false
+	m.spinner.active = false
+	m.spinner.msg = ""
 	if msg.err != nil {
+		m.pendingSelect = ""
 		m.setErr(msg.err.Error())
 		return m, nil
 	}
 	m.all = msg.wts
 	m.recompute()
-	// Load detail for the initially-selected worktree.
+	// After a refresh, put the cursor back on the worktree that was selected
+	// (its index may have shifted; if it disappeared, the clamped cursor from
+	// recompute stands).
+	if m.pendingSelect != "" {
+		m.selectByPath(m.pendingSelect)
+		m.pendingSelect = ""
+	}
+	// Load detail for the selected worktree.
 	return m, m.scheduleDetail()
 }
 
@@ -40,8 +64,8 @@ func (m *model) handleLoadResult(msg loadResultMsg) (tea.Model, tea.Cmd) {
 // and hands the path back to Run; "open" launches a terminal tab; "openpr"
 // opens the PR in a browser; "remove" opens the confirmation prompt.
 func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
-	wt := m.selected()
-	if wt == nil {
+	wt, ok := m.selected()
+	if !ok {
 		return m, nil
 	}
 	switch id {
@@ -62,7 +86,7 @@ func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 			m.setErr("no pull request for this worktree")
 			return m, nil
 		}
-		if err := openURL(pr.URL); err != nil {
+		if err := browser.Open(pr.URL); err != nil {
 			m.setErr(err.Error())
 			return m, nil
 		}
@@ -84,7 +108,8 @@ func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "cd":
 		m.resultAction = id
-		m.resultWT = wt
+		m.resultWT = wt // value copy; safe to read after the program exits
+		m.resultOK = true
 		return m, tea.Quit
 	case "remove":
 		// Ask for confirmation before a destructive removal (especially since
@@ -196,8 +221,8 @@ func (m *model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 // set). The blocking git work runs in a tea.Cmd so the spinner can animate;
 // completion arrives as removeResultMsg.
 func (m *model) doRemove(deleteBranch, forceBranch bool) (tea.Model, tea.Cmd) {
-	wt := m.selected()
-	if wt == nil {
+	wt, ok := m.selected()
+	if !ok {
 		return m, nil
 	}
 	// Pre-flight the guards synchronously so we can report them without a
@@ -210,7 +235,7 @@ func (m *model) doRemove(deleteBranch, forceBranch bool) (tea.Model, tea.Cmd) {
 
 	label := wt.Label()
 	path := wt.Path
-	target := *wt
+	target := wt // already a copy (selected returns a value)
 	dir := m.dir
 	opts := ops.RemoveOptions{Force: wt.Dirty, DeleteBranch: deleteBranch, ForceBranch: forceBranch}
 

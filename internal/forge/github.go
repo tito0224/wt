@@ -2,6 +2,8 @@ package forge
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
@@ -55,12 +57,22 @@ func (github) PR(dir, branch string) (*PR, error) {
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		// gh exits non-zero when there is no PR for the branch. It also does so
-		// on real failures (auth, network), but from a single `pr view` we
-		// can't reliably tell them apart, so treat non-zero as "no PR" — a
-		// definitive, cacheable answer. (Detect already gated on a GitHub
-		// remote + gh being installed.)
-		return nil, ErrNoPR
+		// gh exits non-zero both when the branch has no PR and on real
+		// failures (auth, network). Distinguish them by stderr: only the
+		// definitive "no pull requests found" message maps to ErrNoPR (which
+		// the session cache stores permanently). Anything else — including a
+		// non-ExitError, e.g. gh disappearing mid-run — is reported as a real
+		// error so the cache treats it as transient and retries later, rather
+		// than a flaky network blip hiding PR info for the whole session.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if strings.Contains(strings.ToLower(stderr), "no pull requests found") {
+				return nil, ErrNoPR
+			}
+			return nil, fmt.Errorf("gh pr view %s: %s", branch, stderr)
+		}
+		return nil, fmt.Errorf("gh pr view %s: %w", branch, err)
 	}
 	var p ghPR
 	if err := json.Unmarshal(out, &p); err != nil {

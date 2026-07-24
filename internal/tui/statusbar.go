@@ -75,13 +75,9 @@ func (m *model) keyBarFooter(hints []keyHint) string {
 	// Confirmation prompts take over the footer when active.
 	switch m.list.confirm {
 	case "remove":
-		wt := m.selected()
-		name := ""
-		if wt != nil {
+		name, warn := "", ""
+		if wt, ok := m.selected(); ok {
 			name = wt.Label()
-		}
-		warn := ""
-		if wt != nil {
 			warn = errorStyle.Render(m.removeWarning(wt))
 		}
 		b.WriteString(errorStyle.Render(fmt.Sprintf("remove %s?", name)) + warn +
@@ -96,15 +92,8 @@ func (m *model) keyBarFooter(hints []keyHint) string {
 	}
 
 	// Transient message or in-flight spinner line above the key bar.
-	if m.spinner.active {
-		b.WriteString(m.spinner.model.View() + " " +
-			helpStyle.Render(m.spinner.msg) + "\n")
-	} else if m.message != "" {
-		if m.isErr {
-			b.WriteString(errorStyle.Render("✗ "+m.message) + "\n")
-		} else {
-			b.WriteString(cleanStyle.Render("✓ "+m.message) + "\n")
-		}
+	if ml := m.messageLine(); ml != "" {
+		b.WriteString(ml + "\n")
 	}
 	b.WriteString(renderKeyBar(hints))
 	return b.String()
@@ -113,7 +102,7 @@ func (m *model) keyBarFooter(hints []keyHint) string {
 // removeWarning returns a bracketed warning about work that would be lost by
 // removing wt: uncommitted changes, unpushed local commits, or commits pushed
 // after the PR merged. Returns "" when there's nothing at risk.
-func (m *model) removeWarning(wt *git.Worktree) string {
+func (m *model) removeWarning(wt git.Worktree) string {
 	var risks []string
 	if wt.Dirty {
 		risks = append(risks, "uncommitted changes")
@@ -135,8 +124,8 @@ func (m *model) removeWarning(wt *git.Worktree) string {
 // commit line and a PR line. Content loads asynchronously, so it shows a
 // muted placeholder until the detail arrives.
 func (m *model) statusBar() string {
-	wt := m.selected()
-	if wt == nil {
+	wt, ok := m.selected()
+	if !ok {
 		return ""
 	}
 

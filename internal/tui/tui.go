@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/johnlotito/wt/internal/config"
 	"github.com/johnlotito/wt/internal/forge"
 	"github.com/johnlotito/wt/internal/git"
 	"github.com/johnlotito/wt/internal/launcher"
@@ -163,6 +164,13 @@ type createState struct {
 	loaded      bool
 	rows        []createRow // filtered view: row 0 = new, then matching branches
 	selectedRow int         // index into rows
+
+	// top and cfg are resolved once in enterCreate (a git subprocess + config
+	// file read). The render path uses them to preview the new branch name and
+	// worktree path and repaints every cursor blink (~2×/sec), so it must not
+	// shell out per frame.
+	top string        // repo top-level dir ("" when resolution failed)
+	cfg config.Config // create defaults (branch prefix, worktree dir template)
 }
 
 // launchState is the launcher submenu's state: the available launchers for the
@@ -191,9 +199,10 @@ type model struct {
 	terminalName    string
 	defaultLauncher string // configured quick-launch editor/agent (may be empty)
 
-	view       view
-	helpReturn view  // view to restore when leaving the help overlay
-	rows       []row // filtered view of `all`
+	view         view
+	helpReturn   view  // view to restore when leaving the help overlay
+	launchReturn view  // view to restore when leaving the launcher submenu
+	rows         []row // filtered view of `all`
 
 	list    listState
 	create  createState
@@ -210,6 +219,11 @@ type model struct {
 	details   map[string]detail
 	detailGen int
 
+	// pendingSelect is a worktree path to re-select once the next load
+	// completes. Set by the refresh action (R) so the cursor doesn't jump to
+	// the top when the reloaded set arrives; consumed in handleLoadResult.
+	pendingSelect string
+
 	selectedRow int // index of the highlighted worktree row
 	offset      int // scroll offset (first visible row)
 
@@ -219,8 +233,12 @@ type model struct {
 	isErr   bool
 	quit    bool
 
+	// resultAction/resultWT carry the chosen action and worktree back to Run
+	// after the program exits. resultWT is a copy (valid when resultOK), never
+	// a pointer into m.rows — see selected() for why aliasing rows is unsafe.
 	resultAction string
-	resultWT     *git.Worktree
+	resultWT     git.Worktree
+	resultOK     bool
 }
 
 // Run launches the interactive picker.
@@ -264,7 +282,7 @@ func Run(dir, terminalName, defaultLauncher string) error {
 		return err
 	}
 	fm := res.(*model)
-	if fm.resultWT == nil {
+	if !fm.resultOK {
 		return nil
 	}
 	if fm.resultAction == "cd" {
@@ -313,8 +331,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.setErr(msg.err.Error())
 		}
+		// The external tool may have changed the working tree (difftool can
+		// stage/discard changes), so the cached status counts are stale; drop
+		// the selection's detail and reload it.
+		if p := m.selectedPath(); p != "" {
+			delete(m.details, p)
+		}
 		// Force a repaint: the external program scribbled over the alt-screen.
-		return m, tea.ClearScreen
+		return m, tea.Batch(tea.ClearScreen, m.scheduleDetail())
 	case tea.KeyMsg:
 		// While loading or a git operation is running, swallow input except
 		// Ctrl-C so the spinner isn't interrupted and no conflicting action
@@ -362,7 +386,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // selectedPath returns the highlighted worktree's path, or "" when none.
 func (m *model) selectedPath() string {
-	if wt := m.selected(); wt != nil {
+	if wt, ok := m.selected(); ok {
 		return wt.Path
 	}
 	return ""
@@ -371,8 +395,8 @@ func (m *model) selectedPath() string {
 // selectedPR returns the loaded PR for the highlighted worktree, or nil when
 // none is known (not loaded, no forge, or no PR).
 func (m *model) selectedPR() *forge.PR {
-	wt := m.selected()
-	if wt == nil {
+	wt, ok := m.selected()
+	if !ok {
 		return nil
 	}
 	if d, ok := m.details[wt.Path]; ok {
@@ -384,8 +408,8 @@ func (m *model) selectedPR() *forge.PR {
 // selectedDirty reports whether the highlighted worktree has uncommitted
 // changes (so diff actions apply).
 func (m *model) selectedDirty() bool {
-	wt := m.selected()
-	return wt != nil && wt.Dirty
+	wt, ok := m.selected()
+	return ok && wt.Dirty
 }
 
 func (m *model) View() string {
@@ -423,6 +447,12 @@ func (m *model) recompute() {
 			continue
 		}
 		// Match against "branch  path" so either field can satisfy the query.
+		//
+		// NOTE: match indices are computed against the lowercased haystack but
+		// applied to the original-case label below. This assumes lowercasing
+		// is rune-count-stable (true for ASCII and nearly all of Unicode);
+		// exotic pairs like 'İ' (which lowercases to two runes) would skew the
+		// highlight positions by a rune — cosmetic only, so we accept it.
 		hay := strings.ToLower(w.Label() + " " + w.Path)
 		if idx, score, ok := fuzzyMatch(hay, q); ok {
 			// Only keep highlight indices that fall within the label portion.
@@ -481,11 +511,16 @@ func (m *model) clampScroll() {
 	}
 }
 
-func (m *model) selected() *git.Worktree {
+// selected returns a copy of the highlighted worktree (ok=false when the list
+// is empty). It deliberately returns a value, not a pointer into m.rows:
+// recompute() reuses the rows backing array (m.rows = m.rows[:0]), so a
+// retained pointer would silently alias whatever row lands in that slot after
+// the next refilter/reload.
+func (m *model) selected() (git.Worktree, bool) {
 	if m.selectedRow < 0 || m.selectedRow >= len(m.rows) {
-		return nil
+		return git.Worktree{}, false
 	}
-	return &m.rows[m.selectedRow].wt
+	return m.rows[m.selectedRow].wt, true
 }
 
 func (m *model) moveCursor(delta int) {

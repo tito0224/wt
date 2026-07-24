@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -94,6 +95,13 @@ func rcFile(shell string) (string, error) {
 	case "zsh":
 		return filepath.Join(home, ".zshrc"), nil
 	case "bash":
+		// macOS terminal emulators start bash as a LOGIN shell, which reads
+		// ~/.bash_profile and skips ~/.bashrc — installing into ~/.bashrc
+		// there would write a file that is never sourced. On Linux, terminals
+		// start interactive non-login shells, which read ~/.bashrc.
+		if runtime.GOOS == "darwin" {
+			return filepath.Join(home, ".bash_profile"), nil
+		}
 		return filepath.Join(home, ".bashrc"), nil
 	case "fish":
 		return filepath.Join(home, ".config", "fish", "config.fish"), nil

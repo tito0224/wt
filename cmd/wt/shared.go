@@ -27,11 +27,22 @@ func repoDir() string {
 	return wd
 }
 
-// loadWorktrees resolves the repo dir and returns its worktrees.
-func loadWorktrees() (string, []git.Worktree, error) {
+// requireRepo returns the effective repo dir (see repoDir), erroring when it
+// is not inside a git repository. Commands that operate on a repo call this
+// first so they all fail with the same message.
+func requireRepo() (string, error) {
 	dir := repoDir()
 	if !git.IsRepo(dir) {
-		return "", nil, fmt.Errorf("%s is not a git repository", dir)
+		return "", fmt.Errorf("%s is not a git repository", dir)
+	}
+	return dir, nil
+}
+
+// loadWorktrees resolves the repo dir and returns its worktrees.
+func loadWorktrees() (string, []git.Worktree, error) {
+	dir, err := requireRepo()
+	if err != nil {
+		return "", nil, err
 	}
 	wts, err := git.ListWorktrees(dir)
 	return dir, wts, err

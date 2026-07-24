@@ -132,9 +132,9 @@ func newAddCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			repo := repoDir()
-			if !git.IsRepo(repo) {
-				return fmt.Errorf("%s is not a git repository", repo)
+			repo, err := requireRepo()
+			if err != nil {
+				return err
 			}
 			top, err := git.TopLevel(repo)
 			if err != nil {

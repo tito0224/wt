@@ -19,8 +19,8 @@ const detailDebounce = 150 * time.Millisecond
 // the generation and returns a debounce timer command. The eventual
 // detailDebounceMsg is ignored if the generation has since advanced.
 func (m *model) scheduleDetail() tea.Cmd {
-	wt := m.selected()
-	if wt == nil {
+	wt, ok := m.selected()
+	if !ok {
 		return nil
 	}
 	if _, ok := m.details[wt.Path]; ok {
@@ -39,8 +39,8 @@ func (m *model) handleDetailDebounce(msg detailDebounceMsg) (tea.Model, tea.Cmd)
 	if msg.gen != m.detailGen {
 		return m, nil // selection moved on
 	}
-	wt := m.selected()
-	if wt == nil {
+	wt, ok := m.selected()
+	if !ok {
 		return m, nil
 	}
 	if _, ok := m.details[wt.Path]; ok {

@@ -52,12 +52,12 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampScroll()
 		return m, nil
 	case tea.KeyEnter:
-		if m.selected() != nil {
+		if _, ok := m.selected(); ok {
 			return m.runAction("cd")
 		}
 		return m, nil
 	case tea.KeyTab, tea.KeyRight:
-		if m.selected() != nil {
+		if _, ok := m.selected(); ok {
 			m.view = viewDetail
 		}
 		return m, nil
@@ -91,11 +91,13 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "a":
 			return m.enterCreate()
 		case "l":
-			if m.selected() != nil {
+			if _, ok := m.selected(); ok {
 				m.view = viewDetail
 			}
 		case "r":
 			return m.runAction("remove")
+		case "R":
+			return m.startRefresh()
 		case "?":
 			m.helpReturn = viewList
 			m.view = viewHelp
@@ -134,8 +136,13 @@ func (m *model) updateSearch(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyRunes, tea.KeySpace:
 		m.message = ""
-		m.list.filter += string(key.Runes)
-		if key.Type == tea.KeySpace {
+		// Bubble Tea delivers KeySpace WITH Runes=[]rune{' '} (see the input
+		// parser in bubbletea's key.go), so appending Runes and then a literal
+		// space would insert two. Append the runes when present; only fall
+		// back to a literal space for a (hypothetical) rune-less KeySpace.
+		if len(key.Runes) > 0 {
+			m.list.filter += string(key.Runes)
+		} else if key.Type == tea.KeySpace {
 			m.list.filter += " "
 		}
 		m.recompute()

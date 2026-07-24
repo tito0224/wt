@@ -28,8 +28,8 @@ func hasBinary(name string) bool {
 }
 
 // macAppInstalled reports whether a macOS application bundle with the given
-// bundle identifier is installed (via `open -b`, checked with -h... actually via
-// mdfind). Returns false on non-macOS.
+// bundle identifier is installed, by querying the Spotlight index via mdfind.
+// Returns false on non-macOS.
 func macAppInstalled(bundleID string) bool {
 	if runtime.GOOS != "darwin" {
 		return false
@@ -52,13 +52,4 @@ func runDetached(name string, args ...string) error {
 	// Release so we don't accumulate zombies; we don't care about the exit.
 	go func() { _ = cmd.Wait() }()
 	return nil
-}
-
-// openURL opens rawURL in the default browser (macOS `open`, else `xdg-open`).
-func openURL(rawURL string) error {
-	opener := "xdg-open"
-	if runtime.GOOS == "darwin" {
-		opener = "open"
-	}
-	return runDetached(opener, rawURL)
 }

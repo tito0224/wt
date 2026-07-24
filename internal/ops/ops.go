@@ -21,7 +21,14 @@ import (
 // repoRoot, using config defaults for the base branch, target directory, and
 // branch naming. Non-empty base/dir override the corresponding config values.
 // It returns the resolved branch name and absolute worktree path.
+//
+// The worktree's directory is a single flat component derived from name (see
+// config.DirName); degenerate names are rejected here, before any directory
+// or branch is created.
 func AddWorktree(repoRoot, name, base, dir string) (branch, path string, err error) {
+	if _, err := config.DirName(name); err != nil {
+		return "", "", err
+	}
 	cfg, err := config.Load(repoRoot)
 	if err != nil {
 		return "", "", err
@@ -45,10 +52,15 @@ func AddWorktree(repoRoot, name, base, dir string) (branch, path string, err err
 }
 
 // AddExistingBranch creates a new worktree checked out to an existing branch
-// in the repository containing repoRoot. The worktree directory is derived from
-// the branch name via the configured dir template (no branch prefix is applied,
-// since the branch already exists). It returns the absolute worktree path.
+// in the repository containing repoRoot. The worktree directory is a single
+// flat component derived from the branch name (slashes become '-'; see
+// config.DirName) under the configured dir template — no branch prefix is
+// applied, since the branch already exists. It returns the absolute worktree
+// path.
 func AddExistingBranch(repoRoot, branch string) (path string, err error) {
+	if _, err := config.DirName(branch); err != nil {
+		return "", err
+	}
 	cfg, err := config.Load(repoRoot)
 	if err != nil {
 		return "", err
