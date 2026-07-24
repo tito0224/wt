@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/johnlotito/wt/internal/forge"
 	"github.com/johnlotito/wt/internal/git"
+	"github.com/johnlotito/wt/internal/launcher"
 	"github.com/johnlotito/wt/internal/ops"
 )
 
@@ -36,6 +37,7 @@ const (
 	viewDetail
 	viewCreate
 	viewHelp
+	viewLaunch
 )
 
 // loadResultMsg is delivered when the initial (or a refreshed) worktree
@@ -163,6 +165,15 @@ type createState struct {
 	selectedRow int         // index into rows
 }
 
+// launchState is the launcher submenu's state: the available launchers for the
+// worktree being opened, and the highlighted choice.
+type launchState struct {
+	items       []launcher.Launcher
+	selectedRow int
+	wtPath      string // the worktree the menu was opened for
+	wtLabel     string
+}
+
 // spinnerState is the cross-cutting busy/loading indicator state. active is
 // true during an async git operation (create/remove); loading is true during
 // the initial worktree enumeration. Either animates the spinner; msg labels an
@@ -175,9 +186,10 @@ type spinnerState struct {
 }
 
 type model struct {
-	dir          string
-	all          []git.Worktree // full, unfiltered set
-	terminalName string
+	dir             string
+	all             []git.Worktree // full, unfiltered set
+	terminalName    string
+	defaultLauncher string // configured quick-launch editor/agent (may be empty)
 
 	view       view
 	helpReturn view  // view to restore when leaving the help overlay
@@ -186,6 +198,7 @@ type model struct {
 	list    listState
 	create  createState
 	spinner spinnerState
+	launch  launchState
 
 	// pendingBranch is the branch awaiting a force-delete decision after a
 	// worktree removal whose safe branch delete was refused (unmerged).
@@ -218,15 +231,16 @@ type model struct {
 // free for the single line of result (the chosen worktree path, for `cd`).
 // Using the process's real stdin/stderr (rather than opening /dev/tty) lets the
 // Bubble Tea and Bubbles components work as designed and keeps things portable.
-func Run(dir string, terminalName string) error {
+func Run(dir, terminalName, defaultLauncher string) error {
 	// Start empty and in the loading state; Init kicks off async enumeration.
 	m := &model{
-		dir:          dir,
-		terminalName: terminalName,
-		width:        80,
-		height:       24,
-		spinner:      spinnerState{loading: true},
-		details:      map[string]detail{},
+		dir:             dir,
+		terminalName:    terminalName,
+		defaultLauncher: defaultLauncher,
+		width:           80,
+		height:          24,
+		spinner:         spinnerState{loading: true},
+		details:         map[string]detail{},
 	}
 	m.recompute()
 
@@ -324,6 +338,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewDetail {
 			return m.updateDetail(msg)
 		}
+		if m.view == viewLaunch {
+			return m.updateLaunch(msg)
+		}
 		// Track the selected worktree across the key handler so a changed
 		// selection can (debounced) load its status-bar detail.
 		before := m.selectedPath()
@@ -386,6 +403,8 @@ func (m *model) View() string {
 		raw = m.viewCreateRender()
 	case viewHelp:
 		raw = m.viewHelpRender()
+	case viewLaunch:
+		raw = m.viewLaunchRender()
 	default:
 		raw = m.viewListRender()
 	}

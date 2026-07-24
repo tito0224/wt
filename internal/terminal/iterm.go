@@ -14,8 +14,8 @@ func (iTerm2) Name() string { return "iterm" }
 
 func (iTerm2) Detect() bool { return os.Getenv("TERM_PROGRAM") == "iTerm.app" }
 
-func (iTerm2) OpenTab(dir string) error {
-	cd := "cd " + shellQuote(dir)
+func (iTerm2) OpenTab(dir string, command ...string) error {
+	line := cdCommandLine(dir, command)
 	script := fmt.Sprintf(`
 tell application "iTerm2"
 	activate
@@ -23,6 +23,6 @@ tell application "iTerm2"
 		create tab with default profile
 		tell current session to write text %s
 	end tell
-end tell`, osaQuote(cd))
+end tell`, osaQuote(line))
 	return runOsascript(script)
 }

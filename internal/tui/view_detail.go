@@ -32,6 +32,10 @@ func (m *model) updateDetail(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = viewList
 		case "o":
 			return m.runAction("open")
+		case "e":
+			return m.quickLaunch()
+		case "E":
+			return m.enterLaunch()
 		case "p":
 			return m.runAction("openpr")
 		case "d":

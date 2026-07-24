@@ -78,6 +78,10 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampScroll()
 		case "o":
 			return m.runAction("open")
+		case "e":
+			return m.quickLaunch()
+		case "E":
+			return m.enterLaunch()
 		case "p":
 			return m.runAction("openpr")
 		case "d":

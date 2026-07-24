@@ -20,9 +20,11 @@ type Adapter interface {
 	// Detect reports whether this adapter is appropriate for the current
 	// environment (typically by inspecting env vars like $TERM_PROGRAM).
 	Detect() bool
-	// OpenTab opens a new tab in dir. Implementations should not block waiting
+	// OpenTab opens a new tab/window in dir. When command is non-empty, the tab
+	// runs that command (argv-style: command[0] with command[1:] as args)
+	// instead of an interactive shell. Implementations should not block waiting
 	// on the spawned terminal.
-	OpenTab(dir string) error
+	OpenTab(dir string, command ...string) error
 }
 
 var registry = map[string]Adapter{}

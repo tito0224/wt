@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 
+	"github.com/johnlotito/wt/internal/config"
 	"github.com/johnlotito/wt/internal/git"
+	"github.com/johnlotito/wt/internal/launcher"
 	"github.com/johnlotito/wt/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -43,7 +45,16 @@ func runInteractive() error {
 	if !git.IsRepo(dir) {
 		return fmt.Errorf("%s is not a git repository", dir)
 	}
+	// Resolve launcher settings from config. Best-effort: an unreadable config
+	// just means defaults.
+	var defaultLauncher string
+	if top, err := git.TopLevel(dir); err == nil {
+		if cfg, err := config.Load(top); err == nil {
+			defaultLauncher = cfg.Launch.Default
+			launcher.SetOpencodeWebOrigin(cfg.Launch.OpencodeWebURL)
+		}
+	}
 	// Worktrees are loaded asynchronously inside the TUI (with a spinner), so
 	// the picker appears instantly even when enumerating many worktrees is slow.
-	return tui.Run(dir, flagTerminal)
+	return tui.Run(dir, flagTerminal, defaultLauncher)
 }

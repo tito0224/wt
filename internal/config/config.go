@@ -38,9 +38,22 @@ type Create struct {
 	BranchSeparator string `toml:"branch_separator"`
 }
 
+// Launch holds defaults for opening a worktree in an editor/agent.
+type Launch struct {
+	// Default is the launcher name (e.g. "code", "cursor", "claude") opened by
+	// the quick-launch key. When empty, the first available launcher is used.
+	Default string `toml:"default"`
+	// OpencodeWebURL is the origin (e.g. "http://localhost:4096") of an
+	// already-running `opencode web` server. When set, the "opencode-web"
+	// launcher opens a deep link into that server for the worktree instead of
+	// starting a new server. Empty = start a fresh `opencode web`.
+	OpencodeWebURL string `toml:"opencode_web_url"`
+}
+
 // Config is the top-level configuration.
 type Config struct {
 	Create Create `toml:"create"`
+	Launch Launch `toml:"launch"`
 }
 
 // Default returns the built-in defaults.
@@ -135,6 +148,12 @@ func applyEnv(cfg *Config) {
 	if v, ok := os.LookupEnv("WT_BRANCH_SEPARATOR"); ok {
 		cfg.Create.BranchSeparator = v
 	}
+	if v, ok := os.LookupEnv("WT_LAUNCHER"); ok {
+		cfg.Launch.Default = v
+	}
+	if v, ok := os.LookupEnv("WT_OPENCODE_WEB_URL"); ok {
+		cfg.Launch.OpencodeWebURL = v
+	}
 }
 
 // BranchName composes a branch name from the configured prefix, separator, and
@@ -173,16 +192,15 @@ func (c Create) WorktreeDir(repoRoot, name string) string {
 // writing to a config file. It expands the embedded example template with the
 // config's values, preserving the template's documentation comments.
 func Render(cfg Config) (string, error) {
-	c := cfg.Create
-	if c.BranchSeparator == "" {
-		c.BranchSeparator = "/"
+	if cfg.Create.BranchSeparator == "" {
+		cfg.Create.BranchSeparator = "/"
 	}
 	t, err := template.New("config").Parse(exampleTemplate)
 	if err != nil {
 		return "", fmt.Errorf("parse config template: %w", err)
 	}
 	var b strings.Builder
-	if err := t.Execute(&b, c); err != nil {
+	if err := t.Execute(&b, cfg); err != nil {
 		return "", fmt.Errorf("render config template: %w", err)
 	}
 	return b.String(), nil
