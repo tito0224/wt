@@ -1,0 +1,11 @@
+#!/bin/sh
+# wt pre-commit hook: the fast subset of `make check` (network-dependent
+# checks — tidy-check, vuln — are left to CI). Mirrors CI via shared Makefile
+# targets so a passing commit locally means a green pipeline.
+#
+# Install:    make hooks
+# Skip once:  git commit --no-verify
+set -e
+
+echo "pre-commit: fmt-check vet build staticcheck errcheck test-quick"
+make -s fmt-check vet build staticcheck errcheck test-quick

@@ -117,6 +117,7 @@ func newTestRepo(t *testing.T) string {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	scrubGitEnv(t)
 
 	dir := filepath.Join(t.TempDir(), "repo")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -127,6 +128,24 @@ func newTestRepo(t *testing.T) string {
 	mustGit(t, dir, "config", "user.email", "wt@example.invalid")
 	commitFile(t, dir, "README.md", "hello\n", "initial commit")
 	return dir
+}
+
+// scrubGitEnv removes git's repository-context environment variables. Git
+// hooks (and tools like `git rebase --exec`) export GIT_DIR & co. pointing at
+// the surrounding repository — often as a relative path like ".git" — which
+// would leak into every git subprocess these tests (and the code under test)
+// spawn inside temp repos, breaking them in confusing ways. t.Setenv registers
+// restoration of the original values; the follow-up Unsetenv removes them for
+// the test's duration.
+func scrubGitEnv(t *testing.T) {
+	t.Helper()
+	for _, v := range []string{
+		"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+		"GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX",
+	} {
+		t.Setenv(v, "") // register cleanup that restores the original value
+		os.Unsetenv(v)
+	}
 }
 
 // mustGit runs a git command in dir and fails the test on error.

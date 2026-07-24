@@ -187,6 +187,17 @@ func (myterm) OpenTab(dir string, command ...string) error {
 func init() { terminal.Register(myterm{}) }
 ```
 
+## Development
+
+Checks are plain commands behind Makefile targets; CI and the pre-commit
+hook run the same targets.
+
+```sh
+make hooks   # one-time: install the pre-commit hook
+make check   # everything CI runs (build, fmt, vet, staticcheck, errcheck,
+             # tidy drift, govulncheck, race tests)
+```
+
 ## Status meaning
 
 - **dirty** — uncommitted changes (staged, unstaged, or untracked).
