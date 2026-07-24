@@ -1,0 +1,19 @@
+# Compiled binary (built via `go build -o wt ./cmd/wt`)
+/wt
+wt.exe
+
+# Test binaries and coverage
+*.test
+*.out
+coverage.*
+
+# Go build/module cache artifacts (usually outside repo, but just in case)
+/bin/
+/dist/
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
