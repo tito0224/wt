@@ -96,7 +96,7 @@ func (m *model) keyBarFooter(hints []keyHint) string {
 
 	// Transient message or in-flight spinner line above the key bar.
 	if m.spinner.active {
-		b.WriteString(titleStyle.Render(spinnerFrames[m.spinner.frame]) + " " +
+		b.WriteString(m.spinner.model.View() + " " +
 			helpStyle.Render(m.spinner.msg) + "\n")
 	} else if m.message != "" {
 		if m.isErr {

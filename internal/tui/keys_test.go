@@ -47,8 +47,8 @@ func TestNormalShortcutsNotFilter(t *testing.T) {
 	if m.list.filter != "" {
 		t.Fatalf("'j' leaked into filter: %q", m.list.filter)
 	}
-	if m.cursor != 1 {
-		t.Fatalf("cursor=%d want 1", m.cursor)
+	if m.selectedRow != 1 {
+		t.Fatalf("cursor=%d want 1", m.selectedRow)
 	}
 	// 'r' triggers remove confirmation, not immediate removal.
 	m.updateNormal(runeKey('r'))

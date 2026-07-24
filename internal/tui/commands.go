@@ -95,18 +95,42 @@ func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// doCreate kicks off asynchronous worktree creation from the typed name using
-// config defaults. The blocking git work runs in a tea.Cmd so the UI keeps
-// repainting (spinner) while it happens; completion arrives as createResultMsg.
+// loadBranchesCmd lists local branches for the add screen off the main loop.
+func loadBranchesCmd(dir string) tea.Cmd {
+	return func() tea.Msg {
+		top, err := git.TopLevel(dir)
+		if err != nil {
+			return branchListMsg{err: err}
+		}
+		branches, err := git.LocalBranches(top)
+		return branchListMsg{branches: branches, err: err}
+	}
+}
+
+// handleBranchList stores the loaded branches and rebuilds the create rows.
+func (m *model) handleBranchList(msg branchListMsg) (tea.Model, tea.Cmd) {
+	m.create.loaded = true
+	if msg.err != nil {
+		m.setErr(msg.err.Error())
+		return m, nil
+	}
+	m.create.branches = msg.branches
+	m.recomputeCreate()
+	return m, nil
+}
+
+// doCreate kicks off asynchronous creation of a new branch + worktree from the
+// typed name using config defaults. The blocking git work runs in a tea.Cmd so
+// the UI keeps repainting (spinner); completion arrives as createResultMsg.
 func (m *model) doCreate() (tea.Model, tea.Cmd) {
-	name := strings.TrimSpace(m.create.buf)
+	name := strings.TrimSpace(m.create.input.Value())
 	if name == "" {
 		m.setErr("worktree name required")
 		return m, nil
 	}
 
 	m.view = viewList
-	m.create.buf = ""
+	m.create = createState{}
 	dir := m.dir
 
 	cmd := func() tea.Msg {
@@ -123,6 +147,28 @@ func (m *model) doCreate() (tea.Model, tea.Cmd) {
 		return createResultMsg{branch: branch, path: path, wts: wts}
 	}
 	return m, tea.Batch(m.startBusy(fmt.Sprintf("creating %s…", name)), cmd)
+}
+
+// doAddExisting kicks off asynchronous creation of a worktree for an existing
+// branch. Completion arrives as createResultMsg (branch is the existing name).
+func (m *model) doAddExisting(branch string) (tea.Model, tea.Cmd) {
+	m.view = viewList
+	m.create = createState{}
+	dir := m.dir
+
+	cmd := func() tea.Msg {
+		top, err := git.TopLevel(dir)
+		if err != nil {
+			return createResultMsg{err: err}
+		}
+		path, err := ops.AddExistingBranch(top, branch)
+		if err != nil {
+			return createResultMsg{err: err}
+		}
+		wts, _ := git.ListWorktrees(top)
+		return createResultMsg{branch: branch, path: path, wts: wts}
+	}
+	return m, tea.Batch(m.startBusy(fmt.Sprintf("adding %s…", branch)), cmd)
 }
 
 // handleCreateResult applies the outcome of an async creation: on success it

@@ -152,23 +152,14 @@ func newConfigInitCmd() *cobra.Command {
 // promptConfig interactively fills cfg.Create, showing current values as
 // defaults (accepted by pressing enter).
 //
-// Prompts read from and write to the controlling terminal (/dev/tty) rather
-// than stdin/stdout. This is essential because the shell wrapper invokes wt
-// inside $(...) to capture stdout; if prompts used stdout they would be
-// swallowed by that capture and appear to hang. When there is no controlling
-// tty (e.g. piped input), it falls back to stdin for reading and stderr for
-// the prompt labels so stdout stays clean.
+// Prompt labels are written to stderr (not stdout) so that `wt config init`
+// output stays clean and the prompts remain visible even if stdout is
+// redirected. Input is read from stdin.
 func promptConfig(cfg *config.Config) error {
 	c := &cfg.Create
 
-	var out io.Writer = os.Stderr
-	var in io.Reader = os.Stdin
-	if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
-		defer tty.Close()
-		out = tty
-		in = tty
-	}
-	r := bufio.NewReader(in)
+	out := io.Writer(os.Stderr)
+	r := bufio.NewReader(os.Stdin)
 
 	sep := c.BranchSeparator
 	if sep == "" {

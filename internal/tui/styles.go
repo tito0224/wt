@@ -23,12 +23,18 @@ var (
 	prClosedSty lipgloss.Style // PR state: closed
 )
 
-// initStyles builds all styles from the given renderer. Because the TUI draws
-// to /dev/tty (not stdout, which the shell wrapper captures), color support
-// must be detected from that same tty — otherwise lipgloss profiles the
-// captured stdout, sees no terminal, and strips all color. Passing a renderer
-// bound to the tty fixes that.
+// initStyles builds all styles from the given renderer. The TUI draws to
+// stderr, so color support must be detected from stderr — passing a renderer
+// bound to stderr. (Profiling stdout instead would be wrong: the shell wrapper
+// captures stdout via $(...), where lipgloss sees no terminal and strips color.)
 func initStyles(r *lipgloss.Renderer) {
+	// Make this the process-wide default renderer so the Bubbles components
+	// (textinput cursor, spinner) — which build their own styles via the
+	// default renderer — also detect color from stderr. Without this they'd
+	// profile stdout (captured by the shell wrapper) and render without color,
+	// making the reverse-video text cursor invisible.
+	lipgloss.SetDefaultRenderer(r)
+
 	// Semantic colors use ANSI 0-7 palette slots, which resolve to whatever the
 	// user's terminal theme defines for those slots. This is the most
 	// theme-portable choice: "green" is the theme's green, etc. We avoid

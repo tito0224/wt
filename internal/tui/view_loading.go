@@ -7,7 +7,7 @@ import "strings"
 func (m *model) viewLoadingRender() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("git worktrees") + "\n\n")
-	b.WriteString(titleStyle.Render(spinnerFrames[m.spinner.frame]) + " " +
+	b.WriteString(m.spinner.model.View() + " " +
 		helpStyle.Render("loading worktrees…"))
 	return b.String()
 }
