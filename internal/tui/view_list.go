@@ -79,15 +79,10 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampScroll()
 		case "o":
 			return m.runAction("open")
-		case "n":
+		case "a":
 			m.view = viewCreate
 			m.create.buf = ""
 			m.message = ""
-		case "a":
-			if m.selected() != nil {
-				m.view = viewActions
-				m.menu.cursor = 0
-			}
 		case "s":
 			return m.runAction("status")
 		case "r":
@@ -204,7 +199,7 @@ func (m *model) viewListRender() string {
 	if m.list.searching {
 		help = "type to filter · enter/esc done"
 	} else {
-		help = "j/k move · enter cd · n new · o open · a actions · r remove · / search · q quit"
+		help = "j/k move · enter cd · a add · o open · tab actions · r remove · / search · q quit"
 	}
 	b.WriteString("\n" + m.footer(help))
 	return b.String()

@@ -28,7 +28,7 @@ func newRootCmd() *cobra.Command {
 		"run as if wt was started in this directory")
 
 	root.AddCommand(newListCmd())
-	root.AddCommand(newCreateCmd())
+	root.AddCommand(newAddCmd())
 	root.AddCommand(newOpenCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newRemoveCmd())
