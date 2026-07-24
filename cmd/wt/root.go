@@ -15,6 +15,8 @@ func newRootCmd() *cobra.Command {
 		Long: "wt lists git worktrees, shows whether they have uncommitted changes " +
 			"or unmerged commits, and can launch a new terminal tab in a worktree.\n\n" +
 			"Run `wt` with no arguments to open the interactive picker.",
+		// Version enables cobra's built-in --version flag.
+		Version:       versionString(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
