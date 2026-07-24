@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"encoding/base64"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -53,12 +54,27 @@ func opencodeWebOriginValue() string {
 	return o
 }
 
+// opencodeWebPrompt pre-fills the composer of the opened session, orienting a
+// fresh agent to the worktree and any handover notes.
+const opencodeWebPrompt = "What is your cwd and branch? If there is a HANDOVER.md file, read it to get caught up"
+
 // opencodeWebDeepLink builds the opencode web deep link that opens a session
-// bound to dir: <origin>/<base64url(dir)>/session. This mirrors the opencode
-// web client's route scheme (see the worktree opencode plugin).
+// bound to dir: <origin>/<base64url(dir)>/session?prompt=<...>. This mirrors
+// the opencode web client's route scheme (see the worktree opencode plugin).
 func opencodeWebDeepLink(origin, dir string) string {
 	b64 := base64.RawURLEncoding.EncodeToString([]byte(dir))
-	return origin + "/" + b64 + "/session"
+	link := origin + "/" + b64 + "/session"
+	if opencodeWebPrompt != "" {
+		link += "?prompt=" + encodeURIComponent(opencodeWebPrompt)
+	}
+	return link
+}
+
+// encodeURIComponent matches JavaScript's encodeURIComponent (which the
+// opencode web client expects): like url.QueryEscape but encoding spaces as
+// %20 rather than "+".
+func encodeURIComponent(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
 
 // opencodeWeb opens the Opencode web UI for a worktree. When an origin is
