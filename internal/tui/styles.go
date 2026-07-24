@@ -15,6 +15,12 @@ var (
 	errorStyle    lipgloss.Style
 	matchStyle    lipgloss.Style
 	filterStyle   lipgloss.Style
+
+	keycapStyle lipgloss.Style // key hint "caps" in the footer
+	labelStyle  lipgloss.Style // dim labels next to keycaps
+	prOpenStyle lipgloss.Style // PR state: open
+	prMergedSty lipgloss.Style // PR state: merged
+	prClosedSty lipgloss.Style // PR state: closed
 )
 
 // initStyles builds all styles from the given renderer. Because the TUI draws
@@ -39,4 +45,15 @@ func initStyles(r *lipgloss.Renderer) {
 	errorStyle = r.NewStyle().Foreground(lipgloss.Color("1"))
 	matchStyle = r.NewStyle().Foreground(lipgloss.Color("5")).Bold(true) // magenta
 	filterStyle = r.NewStyle().Foreground(lipgloss.Color("6"))
+
+	// Footer key hints: the key is a reverse-video "cap" that the eye locks
+	// onto; the label is dimmed. This is far more scannable than a flat run of
+	// "key verb · key verb".
+	keycapStyle = r.NewStyle().Reverse(true).Bold(true)
+	labelStyle = r.NewStyle().Foreground(lipgloss.Color("7")) // normal-ish fg
+
+	// PR state colors (GitHub-like): open green, merged magenta, closed red.
+	prOpenStyle = r.NewStyle().Foreground(lipgloss.Color("2"))
+	prMergedSty = r.NewStyle().Foreground(lipgloss.Color("5"))
+	prClosedSty = r.NewStyle().Foreground(lipgloss.Color("1"))
 }

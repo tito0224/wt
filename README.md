@@ -8,9 +8,12 @@ by either `cd`-ing your current shell or opening a new terminal tab.
 
 - List all worktrees with status (`dirty`, `unmerged`, ahead/behind upstream).
 - Interactive picker (Bubble Tea) with an action submenu.
+- Status bar showing the selected worktree's last commit and its GitHub PR
+  (via the `gh` CLI, when installed).
 - `cd` your current shell into a worktree (via a shell wrapper), or open a new
   terminal tab.
 - Pluggable terminal adapters (iTerm2, Terminal.app, tmux, Ghostty, WezTerm).
+- Pluggable forge adapters for PR lookups (GitHub via `gh`).
 
 ## Install
 
@@ -118,6 +121,11 @@ mode keeping the filter. Matching uses a subsequence fuzzy match against the
 branch and path. When filtering, results are ranked best-match-first (favoring
 contiguous, early, and shorter matches); with no filter the list keeps git's
 native order (repo root first).
+
+As you move the highlight, a status bar shows the selected worktree's last
+commit (hash, relative date, author, subject) and, when the `gh` CLI is
+installed and the repo is on GitHub, its pull request (number, state, URL).
+These load in the background and are cached for the session.
 
 ## Terminal selection
 
