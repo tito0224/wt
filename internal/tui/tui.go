@@ -1,5 +1,14 @@
 // Package tui provides an interactive worktree picker rendered as a scrollable,
 // fuzzy-filterable table with an action submenu.
+//
+// The code is organized by concern:
+//
+//   - tui.go            the model, message types, Run, and the Update/View dispatch
+//   - styles.go         lipgloss styles
+//   - spinner.go        the busy/loading spinner
+//   - commands.go       async git effects and their result reducers
+//   - render.go         shared rendering + layout helpers
+//   - view_*.go         per-view update + render (list, actions, create, loading)
 package tui
 
 import (
@@ -7,54 +16,11 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/johnlotito/wt/internal/config"
 	"github.com/johnlotito/wt/internal/git"
-	"github.com/johnlotito/wt/internal/terminal"
 )
-
-var (
-	titleStyle    lipgloss.Style
-	headerStyle   lipgloss.Style
-	selectedStyle lipgloss.Style
-	dirtyStyle    lipgloss.Style
-	unmergedStyle lipgloss.Style
-	cleanStyle    lipgloss.Style
-	currentStyle  lipgloss.Style
-	pathStyle     lipgloss.Style
-	helpStyle     lipgloss.Style
-	errorStyle    lipgloss.Style
-	matchStyle    lipgloss.Style
-	filterStyle   lipgloss.Style
-)
-
-// initStyles builds all styles from the given renderer. Because the TUI draws
-// to /dev/tty (not stdout, which the shell wrapper captures), color support
-// must be detected from that same tty — otherwise lipgloss profiles the
-// captured stdout, sees no terminal, and strips all color. Passing a renderer
-// bound to the tty fixes that.
-func initStyles(r *lipgloss.Renderer) {
-	// Semantic colors use ANSI 0-7 palette slots, which resolve to whatever the
-	// user's terminal theme defines for those slots. This is the most
-	// theme-portable choice: "green" is the theme's green, etc. We avoid
-	// hardcoded bright/256/truecolor values that could clash with a theme.
-	titleStyle = r.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))   // cyan
-	headerStyle = r.NewStyle().Bold(true)                                  // theme fg, bold
-	selectedStyle = r.NewStyle().Reverse(true)                             // swap fg/bg: always readable
-	dirtyStyle = r.NewStyle().Foreground(lipgloss.Color("3"))              // yellow
-	unmergedStyle = r.NewStyle().Foreground(lipgloss.Color("1"))           // red
-	cleanStyle = r.NewStyle().Foreground(lipgloss.Color("2"))              // green
-	currentStyle = r.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // cyan
-	pathStyle = r.NewStyle().Foreground(lipgloss.Color("8"))               // bright black / gray
-	helpStyle = r.NewStyle().Foreground(lipgloss.Color("8"))
-	errorStyle = r.NewStyle().Foreground(lipgloss.Color("1"))
-	matchStyle = r.NewStyle().Foreground(lipgloss.Color("5")).Bold(true) // magenta
-	filterStyle = r.NewStyle().Foreground(lipgloss.Color("6"))
-}
 
 type view int
 
@@ -63,27 +29,6 @@ const (
 	viewActions
 	viewCreate
 )
-
-type action struct {
-	key   string
-	label string
-	id    string
-}
-
-var actions = []action{
-	{"c", "cd here (current shell)", "cd"},
-	{"o", "Open in new terminal tab", "open"},
-	{"s", "Show detailed status", "status"},
-	{"r", "Remove worktree", "remove"},
-}
-
-// spinnerFrames is a simple braille spinner animated via tea.Tick.
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
-const spinnerInterval = 80 * time.Millisecond
-
-// spinTickMsg advances the spinner animation.
-type spinTickMsg struct{}
 
 // loadResultMsg is delivered when the initial (or a refreshed) worktree
 // enumeration finishes.
@@ -117,30 +62,51 @@ type row struct {
 	matched []int // matched rune indices in the label, for highlighting
 }
 
+// listState is the list screen's own state: the fuzzy filter and whether the
+// search input is active.
+type listState struct {
+	filter    string
+	searching bool // true while in search-input mode (entered with '/')
+}
+
+// menuState is the action submenu's state: the highlighted action and, when
+// non-empty, an active y/n confirmation prompt for that action.
+type menuState struct {
+	cursor  int
+	confirm string // non-empty shows a y/n confirmation prompt for this action
+}
+
+// createState is the create screen's state: the worktree name being typed.
+type createState struct {
+	buf string
+}
+
+// spinnerState is the cross-cutting busy/loading indicator state. active is
+// true during an async git operation (create/remove); loading is true during
+// the initial worktree enumeration. Either animates the spinner; msg labels an
+// active operation.
+type spinnerState struct {
+	active  bool
+	loading bool
+	msg     string
+	frame   int
+}
+
 type model struct {
 	dir          string
 	all          []git.Worktree // full, unfiltered set
 	terminalName string
 
-	view      view
-	searching bool   // true while in search-input mode (entered with '/')
-	confirm   string // non-empty shows a y/n confirmation prompt for this action
-	createBuf string // worktree name being typed in the create view
-	filter    string
-	rows      []row // filtered view of `all`
+	view view
+	rows []row // filtered view of `all`
 
-	// busy tracks an in-flight async git operation (create/remove). While
-	// busy, input is ignored and a spinner animates. busyMsg labels it.
-	busy      bool
-	busyMsg   string
-	spinFrame int
+	list    listState
+	menu    menuState
+	create  createState
+	spinner spinnerState
 
-	// loading is true during the initial worktree enumeration, before the
-	// first loadResultMsg arrives.
-	loading bool
-	cursor    int   // index into rows
-	offset    int   // scroll offset (first visible row)
-	actionCur int
+	cursor int // index into rows
+	offset int // scroll offset (first visible row)
 
 	width, height int
 
@@ -166,7 +132,7 @@ func Run(dir string, terminalName string) error {
 		terminalName: terminalName,
 		width:        80,
 		height:       24,
-		loading:      true,
+		spinner:      spinnerState{loading: true},
 	}
 	m.recompute()
 
@@ -207,34 +173,76 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(spinTick(), loadCmd(m.dir))
 }
 
-// loadCmd enumerates worktrees off the main loop, delivering loadResultMsg.
-func loadCmd(dir string) tea.Cmd {
-	return func() tea.Msg {
-		wts, err := git.ListWorktrees(dir)
-		return loadResultMsg{wts: wts, err: err}
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.clampScroll()
+		// Force a full repaint so shrinking the terminal can't leave stale
+		// lines from the previous (taller/wider) frame on screen.
+		return m, tea.ClearScreen
+	case spinTickMsg:
+		// Keep animating only while some git operation is still in flight.
+		if !m.spinner.active && !m.spinner.loading {
+			return m, nil
+		}
+		m.spinner.frame = (m.spinner.frame + 1) % len(spinnerFrames)
+		return m, spinTick()
+	case loadResultMsg:
+		return m.handleLoadResult(msg)
+	case createResultMsg:
+		return m.handleCreateResult(msg)
+	case removeResultMsg:
+		return m.handleRemoveResult(msg)
+	case tea.KeyMsg:
+		// While loading or a git operation is running, swallow input except
+		// Ctrl-C so the spinner isn't interrupted and no conflicting action
+		// starts.
+		if m.spinner.active || m.spinner.loading {
+			if msg.Type == tea.KeyCtrlC {
+				m.quit = true
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		if m.menu.confirm != "" {
+			return m.updateConfirm(msg)
+		}
+		if m.view == viewCreate {
+			return m.updateCreate(msg)
+		}
+		if m.view == viewActions {
+			return m.updateActions(msg)
+		}
+		return m.updateList(msg)
 	}
+	return m, nil
 }
 
-// spinTick schedules the next spinner animation frame.
-func spinTick() tea.Cmd {
-	return tea.Tick(spinnerInterval, func(time.Time) tea.Msg { return spinTickMsg{} })
-}
-
-// startBusy puts the model into the busy state with the given label and
-// returns the command that begins animating the spinner.
-func (m *model) startBusy(label string) tea.Cmd {
-	m.busy = true
-	m.busyMsg = label
-	m.spinFrame = 0
-	m.message = ""
-	return spinTick()
+func (m *model) View() string {
+	if m.quit {
+		return ""
+	}
+	if m.spinner.loading {
+		return m.clampFrame(m.viewLoadingRender())
+	}
+	var raw string
+	switch m.view {
+	case viewActions:
+		raw = m.viewActionsRender()
+	case viewCreate:
+		raw = m.viewCreateRender()
+	default:
+		raw = m.viewListRender()
+	}
+	return m.clampFrame(raw)
 }
 
 // recompute rebuilds the filtered rows from the current filter. Rows keep
 // git's native order (repo root first, as git lists it). When a filter is
 // active, matches are sorted by fuzzy score (best match first).
 func (m *model) recompute() {
-	q := strings.ToLower(strings.TrimSpace(m.filter))
+	q := strings.ToLower(strings.TrimSpace(m.list.filter))
 	m.rows = m.rows[:0]
 	for _, w := range m.all {
 		if q == "" {
@@ -301,203 +309,6 @@ func (m *model) selected() *git.Worktree {
 	return &m.rows[m.cursor].wt
 }
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		m.clampScroll()
-		// Force a full repaint so shrinking the terminal can't leave stale
-		// lines from the previous (taller/wider) frame on screen.
-		return m, tea.ClearScreen
-	case spinTickMsg:
-		// Keep animating only while some git operation is still in flight.
-		if !m.busy && !m.loading {
-			return m, nil
-		}
-		m.spinFrame = (m.spinFrame + 1) % len(spinnerFrames)
-		return m, spinTick()
-	case loadResultMsg:
-		return m.handleLoadResult(msg)
-	case createResultMsg:
-		return m.handleCreateResult(msg)
-	case removeResultMsg:
-		return m.handleRemoveResult(msg)
-	case tea.KeyMsg:
-		// While loading or a git operation is running, swallow input except
-		// Ctrl-C so the spinner isn't interrupted and no conflicting action
-		// starts.
-		if m.busy || m.loading {
-			if msg.Type == tea.KeyCtrlC {
-				m.quit = true
-				return m, tea.Quit
-			}
-			return m, nil
-		}
-		if m.confirm != "" {
-			return m.updateConfirm(msg)
-		}
-		if m.view == viewCreate {
-			return m.updateCreate(msg)
-		}
-		if m.view == viewActions {
-			return m.updateActions(msg)
-		}
-		return m.updateList(msg)
-	}
-	return m, nil
-}
-
-// updateConfirm handles the y/n confirmation prompt.
-func (m *model) updateConfirm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.Type == tea.KeyCtrlC {
-		m.quit = true
-		return m, tea.Quit
-	}
-	switch strings.ToLower(string(key.Runes)) {
-	case "y":
-		action := m.confirm
-		m.confirm = ""
-		if action == "remove" {
-			return m.doRemove()
-		}
-	default:
-		// Anything else (n, esc, etc.) cancels.
-		m.confirm = ""
-		m.setMsg("cancelled")
-	}
-	return m, nil
-}
-
-func (m *model) updateList(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.searching {
-		return m.updateSearch(key)
-	}
-	return m.updateNormal(key)
-}
-
-// updateNormal handles keys in normal mode, where single letters are
-// shortcuts and '/' enters search mode.
-func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	m.message = ""
-	switch key.Type {
-	case tea.KeyCtrlC:
-		m.quit = true
-		return m, tea.Quit
-	case tea.KeyEsc:
-		// First esc clears an active filter; otherwise quit.
-		if m.filter != "" {
-			m.filter = ""
-			m.recompute()
-			return m, nil
-		}
-		m.quit = true
-		return m, tea.Quit
-	case tea.KeyUp:
-		m.moveCursor(-1)
-		return m, nil
-	case tea.KeyDown:
-		m.moveCursor(1)
-		return m, nil
-	case tea.KeyPgUp:
-		m.moveCursor(-m.visibleRows())
-		return m, nil
-	case tea.KeyPgDown:
-		m.moveCursor(m.visibleRows())
-		return m, nil
-	case tea.KeyHome:
-		m.cursor = 0
-		m.clampScroll()
-		return m, nil
-	case tea.KeyEnd:
-		m.cursor = len(m.rows) - 1
-		m.clampScroll()
-		return m, nil
-	case tea.KeyEnter:
-		if m.selected() != nil {
-			return m.runAction("cd")
-		}
-		return m, nil
-	case tea.KeyTab, tea.KeyRight:
-		if m.selected() != nil {
-			m.view = viewActions
-			m.actionCur = 0
-		}
-		return m, nil
-	case tea.KeyRunes:
-		switch string(key.Runes) {
-		case "/":
-			m.searching = true
-			return m, nil
-		case "j":
-			m.moveCursor(1)
-		case "k":
-			m.moveCursor(-1)
-		case "g":
-			m.cursor = 0
-			m.clampScroll()
-		case "G":
-			m.cursor = len(m.rows) - 1
-			m.clampScroll()
-		case "o":
-			return m.runAction("open")
-		case "n":
-			m.view = viewCreate
-			m.createBuf = ""
-			m.message = ""
-		case "a":
-			if m.selected() != nil {
-				m.view = viewActions
-				m.actionCur = 0
-			}
-		case "s":
-			return m.runAction("status")
-		case "r":
-			return m.runAction("remove")
-		case "q":
-			m.quit = true
-			return m, tea.Quit
-		}
-		return m, nil
-	}
-	return m, nil
-}
-
-// updateSearch handles keys while typing a filter query. Enter/esc leave
-// search mode (keeping the current filter); a further esc in normal mode
-// clears it.
-func (m *model) updateSearch(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch key.Type {
-	case tea.KeyCtrlC:
-		m.quit = true
-		return m, tea.Quit
-	case tea.KeyEsc, tea.KeyEnter:
-		m.searching = false
-		return m, nil
-	case tea.KeyUp:
-		m.moveCursor(-1)
-		return m, nil
-	case tea.KeyDown:
-		m.moveCursor(1)
-		return m, nil
-	case tea.KeyBackspace:
-		if m.filter != "" {
-			r := []rune(m.filter)
-			m.filter = string(r[:len(r)-1])
-			m.recompute()
-		}
-		return m, nil
-	case tea.KeyRunes, tea.KeySpace:
-		m.message = ""
-		m.filter += string(key.Runes)
-		if key.Type == tea.KeySpace {
-			m.filter += " "
-		}
-		m.recompute()
-		return m, nil
-	}
-	return m, nil
-}
-
 func (m *model) moveCursor(delta int) {
 	m.message = ""
 	m.cursor += delta
@@ -508,127 +319,6 @@ func (m *model) moveCursor(delta int) {
 		m.cursor = len(m.rows) - 1
 	}
 	m.clampScroll()
-}
-
-func (m *model) updateActions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch key.Type {
-	case tea.KeyCtrlC:
-		m.quit = true
-		return m, tea.Quit
-	case tea.KeyEsc, tea.KeyLeft:
-		m.view = viewList
-		return m, nil
-	case tea.KeyUp:
-		if m.actionCur > 0 {
-			m.actionCur--
-		}
-		return m, nil
-	case tea.KeyDown:
-		if m.actionCur < len(actions)-1 {
-			m.actionCur++
-		}
-		return m, nil
-	case tea.KeyEnter:
-		return m.runAction(actions[m.actionCur].id)
-	case tea.KeyRunes:
-		for _, a := range actions {
-			if string(key.Runes) == a.key {
-				return m.runAction(a.id)
-			}
-		}
-	}
-	return m, nil
-}
-
-// updateCreate handles the worktree-name input view.
-func (m *model) updateCreate(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch key.Type {
-	case tea.KeyCtrlC:
-		m.quit = true
-		return m, tea.Quit
-	case tea.KeyEsc:
-		m.view = viewList
-		m.createBuf = ""
-		return m, nil
-	case tea.KeyEnter:
-		return m.doCreate()
-	case tea.KeyBackspace:
-		if m.createBuf != "" {
-			r := []rune(m.createBuf)
-			m.createBuf = string(r[:len(r)-1])
-		}
-		return m, nil
-	case tea.KeyRunes, tea.KeySpace:
-		if key.Type == tea.KeySpace {
-			m.createBuf += " "
-		} else {
-			m.createBuf += string(key.Runes)
-		}
-		return m, nil
-	}
-	return m, nil
-}
-
-// doCreate kicks off asynchronous worktree creation from the typed name using
-// config defaults. The blocking git work runs in a tea.Cmd so the UI keeps
-// repainting (spinner) while it happens; completion arrives as createResultMsg.
-func (m *model) doCreate() (tea.Model, tea.Cmd) {
-	name := strings.TrimSpace(m.createBuf)
-	if name == "" {
-		m.setErr("worktree name required")
-		return m, nil
-	}
-
-	m.view = viewList
-	m.createBuf = ""
-	dir := m.dir
-
-	cmd := func() tea.Msg {
-		top, err := git.TopLevel(dir)
-		if err != nil {
-			return createResultMsg{err: err}
-		}
-		branch, path, err := config.CreateWorktree(top, name, "", "")
-		if err != nil {
-			return createResultMsg{err: err}
-		}
-		// Refresh from git so the new worktree is fully enriched (status, etc.).
-		wts, _ := git.ListWorktrees(top)
-		return createResultMsg{branch: branch, path: path, wts: wts}
-	}
-	return m, tea.Batch(m.startBusy(fmt.Sprintf("creating %s…", name)), cmd)
-}
-
-// handleLoadResult applies the outcome of the initial worktree enumeration.
-func (m *model) handleLoadResult(msg loadResultMsg) (tea.Model, tea.Cmd) {
-	m.loading = false
-	if msg.err != nil {
-		m.setErr(msg.err.Error())
-		return m, nil
-	}
-	m.all = msg.wts
-	m.recompute()
-	return m, nil
-}
-
-// handleCreateResult applies the outcome of an async creation: on success it
-// swaps in the refreshed worktree set, clears the filter, and highlights the
-// new worktree; on failure it surfaces the error.
-func (m *model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
-	m.busy = false
-	m.busyMsg = ""
-	if msg.err != nil {
-		m.setErr(msg.err.Error())
-		return m, nil
-	}
-	if msg.wts != nil {
-		m.all = msg.wts
-	}
-	m.filter = ""
-	m.recompute()
-	m.selectByPath(msg.path)
-	m.setMsg(fmt.Sprintf("created %s at %s", msg.branch, abbrevHome(msg.path)))
-	return m, nil
 }
 
 // selectByPath moves the cursor to the row whose worktree path matches, if
@@ -643,82 +333,6 @@ func (m *model) selectByPath(path string) {
 	}
 }
 
-func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
-	wt := m.selected()
-	if wt == nil {
-		return m, nil
-	}
-	switch id {
-	case "open":
-		adapter, err := terminal.Resolve(m.terminalName)
-		if err != nil {
-			m.setErr(err.Error())
-			m.view = viewList
-			return m, nil
-		}
-		if err := adapter.OpenTab(wt.Path); err != nil {
-			m.setErr(err.Error())
-			m.view = viewList
-			return m, nil
-		}
-		m.setMsg(fmt.Sprintf("opened %s in new %s tab", wt.Label(), adapter.Name()))
-		m.view = viewList
-	case "cd", "status":
-		m.resultAction = id
-		m.resultWT = wt
-		return m, tea.Quit
-	case "remove":
-		// Ask for confirmation before a destructive removal (especially since
-		// dirty worktrees are force-removed).
-		m.view = viewList
-		m.confirm = "remove"
-		return m, nil
-	}
-	return m, nil
-}
-
-// doRemove kicks off asynchronous worktree removal after confirmation. The
-// blocking git work runs in a tea.Cmd so the spinner can animate; completion
-// arrives as removeResultMsg.
-func (m *model) doRemove() (tea.Model, tea.Cmd) {
-	wt := m.selected()
-	if wt == nil {
-		return m, nil
-	}
-	if wt.Current {
-		m.setErr("refusing to remove the worktree you're currently in")
-		return m, nil
-	}
-	force := wt.Dirty
-	label := wt.Label()
-	path := wt.Path
-	dir := m.dir
-
-	cmd := func() tea.Msg {
-		err := git.Remove(dir, path, force)
-		return removeResultMsg{label: label, path: path, force: force, err: err}
-	}
-	return m, tea.Batch(m.startBusy(fmt.Sprintf("removing %s…", label)), cmd)
-}
-
-// handleRemoveResult applies the outcome of an async removal: on success it
-// drops the worktree from the list; on failure it surfaces the error.
-func (m *model) handleRemoveResult(msg removeResultMsg) (tea.Model, tea.Cmd) {
-	m.busy = false
-	m.busyMsg = ""
-	if msg.err != nil {
-		m.setErr(msg.err.Error())
-		return m, nil
-	}
-	note := ""
-	if msg.force {
-		note = " (forced, discarded changes)"
-	}
-	m.removeFromAll(msg.path)
-	m.setMsg(fmt.Sprintf("removed %s%s", msg.label, note))
-	return m, nil
-}
-
 func (m *model) removeFromAll(path string) {
 	for i := range m.all {
 		if m.all[i].Path == path {
@@ -731,419 +345,3 @@ func (m *model) removeFromAll(path string) {
 
 func (m *model) setMsg(s string) { m.message, m.isErr = s, false }
 func (m *model) setErr(s string) { m.message, m.isErr = s, true }
-
-func (m *model) View() string {
-	if m.quit {
-		return ""
-	}
-	if m.loading {
-		return m.clampFrame(m.viewLoadingRender())
-	}
-	var raw string
-	switch m.view {
-	case viewActions:
-		raw = m.viewActionsRender()
-	case viewCreate:
-		raw = m.viewCreateRender()
-	default:
-		raw = m.viewListRender()
-	}
-	return m.clampFrame(raw)
-}
-
-// clampFrame guarantees the rendered frame never exceeds the terminal size:
-// every line is hard-truncated to the terminal width, and the number of lines
-// is capped to the terminal height. This prevents soft-wrapping (which
-// desyncs Bubble Tea's line accounting and produces garbage frames on resize).
-func (m *model) clampFrame(s string) string {
-	lines := strings.Split(s, "\n")
-	if m.height > 0 && len(lines) > m.height {
-		lines = lines[:m.height]
-	}
-	if m.width > 0 {
-		for i, ln := range lines {
-			if lipgloss.Width(ln) > m.width {
-				// ansi.Truncate respects escape sequences (won't cut mid-code).
-				lines[i] = ansi.Truncate(ln, m.width, "")
-			}
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// layout describes the computed column widths for the current terminal size.
-type layout struct {
-	branchW  int
-	statusW  int
-	pathW    int  // 0 means the PATH column is dropped
-	showPath bool
-}
-
-// Fixed spacing: "> " row prefix (2) + two 2-space column separators (4).
-const rowOverhead = 2 + 2 + 2
-
-// computeLayout allocates horizontal space with this priority:
-//  1. STATUS is never truncated (short, known values).
-//  2. PATH shrinks first, and is dropped entirely if too little room remains.
-//  3. BRANCH is truncated only as a last resort, when STATUS + a minimal BRANCH
-//     don't even fit.
-func (m *model) computeLayout() layout {
-	// Natural widths from content.
-	branchNat := lipgloss.Width("BRANCH")
-	statusNat := lipgloss.Width("STATUS")
-	pathNat := lipgloss.Width("PATH")
-	for _, r := range m.rows {
-		if w := lipgloss.Width(r.wt.DisplayLabel()); w > branchNat {
-			branchNat = w
-		}
-		if w := lipgloss.Width(plainStatus(r.wt)); w > statusNat {
-			statusNat = w
-		}
-		if w := lipgloss.Width(abbrevHome(r.wt.Path)); w > pathNat {
-			pathNat = w
-		}
-	}
-
-	avail := m.width - rowOverhead
-	if avail < 1 {
-		avail = 1
-	}
-
-	// STATUS is protected from truncation relative to the other columns, but at
-	// pathologically narrow widths (STATUS alone wider than the terminal) even
-	// it must yield; reserve at least minBranch for the branch column.
-	const minBranch = 6
-	statusW := statusNat
-	if statusW > avail-minBranch {
-		statusW = max(1, avail-minBranch)
-	}
-	l := layout{statusW: statusW}
-
-	// Space left for BRANCH + PATH after STATUS.
-	rest := avail - statusW
-	if rest < 0 {
-		rest = 0
-	}
-
-	// Last resort: not even STATUS + a minimal branch fits -> truncate BRANCH.
-	if rest < minBranch {
-		l.branchW = max(1, rest)
-		l.showPath = false
-		return l
-	}
-
-	// Try to give BRANCH its natural width, capped so a single huge branch
-	// can't starve PATH.
-	branchW := branchNat
-	if branchW > 40 {
-		branchW = 40
-	}
-	if branchW > rest {
-		branchW = rest
-	}
-	l.branchW = branchW
-
-	// PATH gets whatever remains. Drop it if there's too little to be useful.
-	const minPath = 12
-	pathW := rest - branchW
-	if pathW >= minPath {
-		l.showPath = true
-		l.pathW = min(pathW, pathNat)
-	}
-	return l
-}
-
-// viewLoadingRender shows the spinner while the initial worktree enumeration
-// is in progress.
-func (m *model) viewLoadingRender() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("git worktrees") + "\n\n")
-	b.WriteString(titleStyle.Render(spinnerFrames[m.spinFrame]) + " " +
-		helpStyle.Render("loading worktrees…"))
-	return b.String()
-}
-
-func (m *model) viewListRender() string {
-	var b strings.Builder
-	lay := m.computeLayout()
-
-	// Title + count.
-	title := fmt.Sprintf("git worktrees (%d)", len(m.all))
-	if m.filter != "" {
-		title += fmt.Sprintf("  —  %d match", len(m.rows))
-	}
-	b.WriteString(titleStyle.Render(title) + "\n")
-
-	// Filter/search line.
-	switch {
-	case m.searching:
-		// Show a cursor block while actively typing the query.
-		b.WriteString(filterStyle.Render("/"+m.filter+"▏") + "\n")
-	case m.filter != "":
-		b.WriteString(filterStyle.Render("/"+m.filter) + helpStyle.Render("  (filtered)") + "\n")
-	default:
-		b.WriteString(helpStyle.Render("press / to search") + "\n")
-	}
-
-	// Header. Two leading spaces align with the "> " / "  " row prefix.
-	header := "  " + pad(trunc("BRANCH", lay.branchW), lay.branchW) + "  " + pad("STATUS", lay.statusW)
-	if lay.showPath {
-		header += "  PATH"
-	}
-	b.WriteString(headerStyle.Render(header) + "\n")
-
-	if len(m.rows) == 0 {
-		b.WriteString(pathStyle.Render("  (no matches)") + "\n")
-	}
-
-	vis := m.visibleRows()
-	end := m.offset + vis
-	if end > len(m.rows) {
-		end = len(m.rows)
-	}
-	for i := m.offset; i < end; i++ {
-		b.WriteString(m.renderRow(m.rows[i], i == m.cursor, lay) + "\n")
-	}
-
-	// Scroll indicator.
-	if len(m.rows) > vis {
-		b.WriteString(helpStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.offset+1, end, len(m.rows))) + "\n")
-	}
-
-	// Confirmation prompt takes over the footer when active.
-	if m.confirm == "remove" {
-		wt := m.selected()
-		name := ""
-		if wt != nil {
-			name = wt.Label()
-		}
-		warn := ""
-		if wt != nil && wt.Dirty {
-			warn = errorStyle.Render(" [has uncommitted changes!]")
-		}
-		b.WriteString("\n" + errorStyle.Render(fmt.Sprintf("remove %s?", name)) + warn +
-			helpStyle.Render("  (y/n)"))
-		return b.String()
-	}
-
-	var help string
-	if m.searching {
-		help = "type to filter · enter/esc done"
-	} else {
-		help = "j/k move · enter cd · n new · o open · a actions · r remove · / search · q quit"
-	}
-	b.WriteString("\n" + m.footer(help))
-	return b.String()
-}
-
-func (m *model) viewActionsRender() string {
-	wt := m.selected()
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("actions: "+wt.Label()) + "\n")
-	b.WriteString(pathStyle.Render(wt.Path) + "\n\n")
-	for i, a := range actions {
-		label := fmt.Sprintf("  [%s] %s", a.key, a.label)
-		if i == m.actionCur {
-			label = selectedStyle.Render(fmt.Sprintf("> [%s] %s", a.key, a.label))
-		}
-		b.WriteString(label + "\n")
-	}
-	b.WriteString("\n" + m.footer("↑/↓ move · enter run · esc back"))
-	return b.String()
-}
-
-func (m *model) viewCreateRender() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("create worktree") + "\n\n")
-	b.WriteString(helpStyle.Render("name (base branch, dir & prefix come from config)") + "\n")
-	b.WriteString(filterStyle.Render(m.createBuf+"▏") + "\n")
-
-	// Preview the resulting branch/path when a name has been typed.
-	if name := strings.TrimSpace(m.createBuf); name != "" {
-		if top, err := git.TopLevel(m.dir); err == nil {
-			if cfg, err := config.Load(top); err == nil {
-				branch := cfg.Create.BranchName(name)
-				path := abbrevHome(cfg.Create.WorktreeDir(top, name))
-				b.WriteString("\n" + pathStyle.Render("→ "+branch+"  "+path) + "\n")
-			}
-		}
-	}
-
-	b.WriteString("\n" + m.footer("enter create · esc cancel"))
-	return b.String()
-}
-
-func (m *model) footer(help string) string {
-	var b strings.Builder
-	// While a git operation is in flight, the spinner + label replace the
-	// usual message/help line.
-	if m.busy {
-		b.WriteString(titleStyle.Render(spinnerFrames[m.spinFrame]) + " " + helpStyle.Render(m.busyMsg))
-		return b.String()
-	}
-	if m.message != "" {
-		if m.isErr {
-			b.WriteString(errorStyle.Render("✗ "+m.message) + "\n")
-		} else {
-			b.WriteString(cleanStyle.Render("✓ "+m.message) + "\n")
-		}
-	}
-	b.WriteString(helpStyle.Render(help))
-	return b.String()
-}
-
-// renderRow renders one table row. The selected row is drawn as plain text
-// (no per-cell color) wrapped in reverse video, which stays readable on any
-// theme. Non-selected rows get per-cell semantic coloring. Both share the same
-// widths from the layout, so columns always align and never overflow.
-func (m *model) renderRow(r row, selected bool, lay layout) string {
-	label := trunc(r.wt.DisplayLabel(), lay.branchW)
-	status := trunc(plainStatus(r.wt), lay.statusW)
-	labelW := lipgloss.Width(label)
-	statusFits := status == plainStatus(r.wt)
-
-	if selected {
-		line := "> " + pad(label, lay.branchW) + "  " + pad(status, lay.statusW)
-		if lay.showPath {
-			line += "  " + truncPath(r.wt.Path, lay.pathW)
-		}
-		return selectedStyle.Render(line)
-	}
-
-	// Colored cells, padded to width using plain-text display width. When the
-	// label was truncated we can't recolor by original match indices, so fall
-	// back to plain (still current-colored) rendering. Colored status only when
-	// it wasn't clipped (clipping breaks per-tag coloring).
-	branchCell := colorLabelTrunc(r, label) + strings.Repeat(" ", max(0, lay.branchW-labelW))
-	statusColored := coloredStatus(r.wt)
-	if !statusFits {
-		statusColored = status
-	}
-	statusCell := statusColored + strings.Repeat(" ", max(0, lay.statusW-lipgloss.Width(status)))
-	out := "  " + branchCell + "  " + statusCell
-	if lay.showPath {
-		out += "  " + pathStyle.Render(truncPath(r.wt.Path, lay.pathW))
-	}
-	return out
-}
-
-// colorLabelTrunc colors a (possibly truncated) label: cyan for the current
-// worktree, otherwise fuzzy-match highlighting when the label is intact.
-func colorLabelTrunc(r row, truncated string) string {
-	if r.wt.Current {
-		return currentStyle.Render(truncated)
-	}
-	// If truncation changed the text, match indices no longer line up.
-	if truncated != r.wt.DisplayLabel() {
-		return truncated
-	}
-	return highlight(r.wt.Label(), r.matched)
-}
-
-// trunc right-truncates s to a display width, appending "…" when clipped.
-func trunc(s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if lipgloss.Width(s) <= width {
-		return s
-	}
-	r := []rune(s)
-	for len(r) > 0 && lipgloss.Width(string(r))+1 > width {
-		r = r[:len(r)-1]
-	}
-	return string(r) + "…"
-}
-
-// abbrevHome replaces the user's home directory prefix with "~".
-func abbrevHome(p string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return p
-	}
-	if p == home {
-		return "~"
-	}
-	if strings.HasPrefix(p, home+string(os.PathSeparator)) {
-		return "~" + p[len(home):]
-	}
-	return p
-}
-
-// pad right-pads s with spaces to the given display width.
-func pad(s string, width int) string {
-	w := lipgloss.Width(s)
-	if w >= width {
-		return s
-	}
-	return s + strings.Repeat(" ", width-w)
-}
-
-// plainStatus is the uncolored status string, used for width calculations.
-func plainStatus(w git.Worktree) string { return w.StatusString() }
-
-// coloredStatus renders status tags with per-tag colors.
-func coloredStatus(w git.Worktree) string {
-	tags := w.StatusTags()
-	parts := make([]string, len(tags))
-	for i, t := range tags {
-		switch {
-		case t == "dirty":
-			parts[i] = dirtyStyle.Render(t)
-		case t == "unmerged":
-			parts[i] = unmergedStyle.Render(t)
-		case t == "clean":
-			parts[i] = cleanStyle.Render(t)
-		default:
-			parts[i] = pathStyle.Render(t)
-		}
-	}
-	return strings.Join(parts, ", ")
-}
-
-// truncPath abbreviates $HOME to ~ and left-ellipsizes to fit width, keeping
-// the tail (the worktree's own directory name) visible.
-func truncPath(p string, width int) string {
-	p = abbrevHome(p)
-	if width <= 0 {
-		return ""
-	}
-	if lipgloss.Width(p) <= width {
-		return p
-	}
-	r := []rune(p)
-	for len(r) > 0 && lipgloss.Width(string(r))+1 > width {
-		r = r[1:]
-	}
-	return "…" + string(r)
-}
-
-// highlight bolds the matched rune positions in s.
-func highlight(s string, matched []int) string {
-	if len(matched) == 0 {
-		return s
-	}
-	set := make(map[int]bool, len(matched))
-	for _, i := range matched {
-		set[i] = true
-	}
-	var b strings.Builder
-	for i, r := range []rune(s) {
-		if set[i] {
-			b.WriteString(matchStyle.Render(string(r)))
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-func printStatus(w git.Worktree) {
-	fmt.Printf("%s\n  path:     %s\n", w.Label(), w.Path)
-	if !w.Bare {
-		fmt.Printf("  dirty:    %t\n  unmerged: %t\n", w.Dirty, w.Unmerged)
-		if w.HasUpstream {
-			fmt.Printf("  ahead:    %d\n  behind:   %d\n", w.Ahead, w.Behind)
-		}
-	}
-}

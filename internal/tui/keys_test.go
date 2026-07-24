@@ -15,27 +15,27 @@ func TestSearchModeToggle(t *testing.T) {
 
 	// '/' enters search mode.
 	m.updateNormal(runeKey('/'))
-	if !m.searching {
+	if !m.list.searching {
 		t.Fatal("expected searching=true after '/'")
 	}
 	// typing builds filter
 	m.updateSearch(runeKey('f'))
 	m.updateSearch(runeKey('i'))
-	if m.filter != "fi" {
-		t.Fatalf("filter=%q want fi", m.filter)
+	if m.list.filter != "fi" {
+		t.Fatalf("filter=%q want fi", m.list.filter)
 	}
 	// esc exits search but keeps filter
 	m.updateSearch(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.searching {
+	if m.list.searching {
 		t.Fatal("expected searching=false after esc")
 	}
-	if m.filter != "fi" {
-		t.Fatalf("filter cleared unexpectedly: %q", m.filter)
+	if m.list.filter != "fi" {
+		t.Fatalf("filter cleared unexpectedly: %q", m.list.filter)
 	}
 	// esc in normal mode clears filter
 	m.updateNormal(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.filter != "" {
-		t.Fatalf("expected filter cleared, got %q", m.filter)
+	if m.list.filter != "" {
+		t.Fatalf("expected filter cleared, got %q", m.list.filter)
 	}
 }
 
@@ -44,20 +44,20 @@ func TestNormalShortcutsNotFilter(t *testing.T) {
 	m := &model{width: 80, height: 24, rows: rowsFixture()}
 	// 'j' should move cursor, not add to filter.
 	m.updateNormal(runeKey('j'))
-	if m.filter != "" {
-		t.Fatalf("'j' leaked into filter: %q", m.filter)
+	if m.list.filter != "" {
+		t.Fatalf("'j' leaked into filter: %q", m.list.filter)
 	}
 	if m.cursor != 1 {
 		t.Fatalf("cursor=%d want 1", m.cursor)
 	}
 	// 'r' triggers remove confirmation, not immediate removal.
 	m.updateNormal(runeKey('r'))
-	if m.confirm != "remove" {
-		t.Fatalf("expected confirm=remove, got %q", m.confirm)
+	if m.menu.confirm != "remove" {
+		t.Fatalf("expected confirm=remove, got %q", m.menu.confirm)
 	}
 	// 'n' cancels.
 	m.updateConfirm(runeKey('n'))
-	if m.confirm != "" {
+	if m.menu.confirm != "" {
 		t.Fatal("expected confirm cleared after n")
 	}
 }

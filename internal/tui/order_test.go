@@ -28,7 +28,7 @@ func TestOrdering(t *testing.T) {
 
 	// Filtered by "pay": both "pay" and "feature-payments" match; exact/shorter
 	// "pay" should rank first by score.
-	m.filter = "pay"
+	m.list.filter = "pay"
 	m.recompute()
 	if len(m.rows) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(m.rows))
