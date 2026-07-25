@@ -42,6 +42,8 @@ func (m *model) updateDetail(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.runAction("diff")
 		case "D":
 			return m.runAction("difftool")
+		case "y":
+			return m.runAction("yank")
 		case "r":
 			return m.runAction("remove")
 		case "R":

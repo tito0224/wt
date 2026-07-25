@@ -159,6 +159,7 @@ Normal mode:
 | `e` | open in the default editor / agent |
 | `E` | choose an editor / agent to open |
 | `tab` / `→` / `l` | open the details screen |
+| `y` | copy the worktree path to the clipboard |
 | `r` | remove (`y` worktree · `b` worktree + branch · `n` cancel) |
 | `R` | refresh the worktree list and statuses |
 | `/` | search / filter |
