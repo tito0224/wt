@@ -2,13 +2,23 @@ package main
 
 import "runtime/debug"
 
-// versionString derives the version reported by `wt --version` from the build
-// info the Go toolchain embeds automatically — no ldflags or release scripting
-// needed. Binaries built by `go install module@vX.Y.Z` report the module
-// version; local `go build` binaries (which report the pseudo-version
-// "(devel)") fall back to the VCS commit that was compiled, with a "-dirty"
-// suffix when the working tree had uncommitted changes.
+// version is injected by release builds via
+// `-ldflags "-X main.version=v1.2.3"` (see `make dist`): cross-compiled
+// artifacts are built from a tag in CI, where the explicit tag is more
+// reliable than VCS stamping. Empty for normal go build/install builds,
+// which use the toolchain's embedded build info instead.
+var version string
+
+// versionString derives the version reported by `wt --version`. Release
+// artifacts carry an injected version; otherwise it comes from the build info
+// the Go toolchain embeds automatically — binaries built by
+// `go install module@vX.Y.Z` report the module version, and local `go build`
+// binaries report the VCS-derived pseudo-version, with a "-dirty" suffix when
+// the working tree had uncommitted changes.
 func versionString() string {
+	if version != "" {
+		return version
+	}
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
 		return "unknown"

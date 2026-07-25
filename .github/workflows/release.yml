@@ -1,0 +1,91 @@
+name: Release
+
+# Pushing a semver tag (v1.2.3, v1.0.0-beta, ...) runs the full check suite,
+# builds cross-platform artifacts, drafts release notes with an AI model, and
+# publishes a GitHub Release. Tags only become releases if checks pass.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release + upload artifacts
+  models: read # GitHub Models inference for drafting release notes
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history + tags: needed to find the previous tag and build
+          # the commit summary the release notes are drafted from.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Checks (full battery)
+        run: make check
+
+      - name: Build artifacts
+        run: make dist VERSION="${{ github.ref_name }}"
+
+      - name: Collect changes since previous tag
+        id: changes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          tag="$TAG"
+          prev="$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)"
+          {
+            echo "log<<CHANGES_EOF"
+            if [ -n "$prev" ]; then
+              echo "Commits between $prev and $tag:"
+              git log --no-merges --format='- %s' "$prev..$tag"
+            else
+              echo "First release. All commits:"
+              git log --no-merges --format='- %s' "$tag"
+            fi
+            echo "CHANGES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Draft release notes (AI)
+        id: ai
+        # Best-effort: on any Models failure the release falls back to
+        # GitHub's auto-generated notes below.
+        continue-on-error: true
+        uses: actions/ai-inference@v1
+        with:
+          system-prompt: >
+            You write concise, accurate release notes for wt, a Go CLI that
+            manages git worktrees (interactive picker, PR-aware status,
+            editor/agent launchers, shell cd integration). You are given raw
+            commit subjects. Group them into short markdown sections
+            (Highlights, Fixes, Internal — omit empty sections), rewriting
+            subjects into user-facing language. Do not invent changes that are
+            not in the commits. No preamble, no heading with the version
+            number, no install instructions; output only the notes body.
+          prompt: |
+            Draft the release notes for tag ${{ github.ref_name }}.
+
+            ${{ steps.changes.outputs.log }}
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AI_NOTES: ${{ steps.ai.outputs.response }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          tag="$TAG"
+          args=(--title "$tag" --verify-tag)
+          # Semver prerelease (any tag with a hyphen, e.g. v1.0.0-beta).
+          case "$tag" in *-*) args+=(--prerelease);; esac
+          if [ -n "$AI_NOTES" ]; then
+            printf '%s\n' "$AI_NOTES" > notes.md
+            args+=(--notes-file notes.md)
+          else
+            echo "AI notes unavailable; using generated notes" >&2
+            args+=(--generate-notes)
+          fi
+          gh release create "$tag" dist/*.tar.gz dist/checksums.txt "${args[@]}"
