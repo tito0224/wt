@@ -168,17 +168,35 @@ func applyEnv(cfg *Config) {
 	}
 }
 
+// separator returns the configured branch separator, defaulting to "/".
+func (c Create) separator() string {
+	if c.BranchSeparator == "" {
+		return "/"
+	}
+	return c.BranchSeparator
+}
+
+// BareName removes the configured branch prefix and separator from name when
+// present: users naturally type the branch name they want ("jl/foo") where a
+// bare worktree name ("foo") is expected, and without this the prefix would
+// be applied twice ("jl/jl/foo"). A name that is exactly the bare prefix is
+// left alone — there is no way to tell whether it was meant as a full branch
+// name or a worktree called "jl".
+func (c Create) BareName(name string) string {
+	if c.BranchPrefix == "" {
+		return name
+	}
+	return strings.TrimPrefix(name, c.BranchPrefix+c.separator())
+}
+
 // BranchName composes a branch name from the configured prefix, separator, and
-// the given worktree name.
+// the given worktree name. A name that already carries the prefix is used
+// as-is rather than prefixed again.
 func (c Create) BranchName(name string) string {
 	if c.BranchPrefix == "" {
 		return name
 	}
-	sep := c.BranchSeparator
-	if sep == "" {
-		sep = "/"
-	}
-	return c.BranchPrefix + sep + name
+	return c.BranchPrefix + c.separator() + c.BareName(name)
 }
 
 // DirName converts a worktree/branch name into the single path component used
@@ -208,8 +226,11 @@ func DirName(name string) (string, error) {
 
 // WorktreeDir resolves the directory a new worktree named `name` should live
 // in, given the repository root. It expands the {repo} placeholder, resolves
-// relative paths against repoRoot, and appends the worktree name — normalized
-// to a single flat path element via DirName — as the final component.
+// relative paths against repoRoot, and appends the worktree name — with any
+// configured branch prefix stripped (see BareName) and normalized to a single
+// flat path element via DirName — as the final component. Stripping the
+// prefix keeps the result identical whether the user typed "foo" or "jl/foo",
+// and gives prefixed branches short directory names ("foo", not "jl-foo").
 func (c Create) WorktreeDir(repoRoot, name string) string {
 	repoName := filepath.Base(repoRoot)
 
@@ -222,7 +243,7 @@ func (c Create) WorktreeDir(repoRoot, name string) string {
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(repoRoot, dir)
 	}
-	component, err := DirName(name)
+	component, err := DirName(c.BareName(name))
 	if err != nil {
 		// Degenerate names are rejected by ops before anything is created;
 		// this path only serves display (the add-screen path preview). Return

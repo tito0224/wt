@@ -81,11 +81,14 @@ func runCreateHooks(repoRoot, path, branch string, cmds []string, out io.Writer)
 // When a hook fails, the returned branch and path are still valid — the
 // worktree exists — and err is a *HookFailedError.
 func AddWorktree(repoRoot, name, base, dir string, hookOut io.Writer) (branch, path string, err error) {
-	if _, err := config.DirName(name); err != nil {
-		return "", "", err
-	}
 	cfg, err := config.Load(repoRoot)
 	if err != nil {
+		return "", "", err
+	}
+	// Validate the *bare* name — what branch/dir derivation actually uses.
+	// This also catches a name that is nothing but the prefix+separator
+	// ("jl/"), which strips to an empty bare name.
+	if _, err := config.DirName(cfg.Create.BareName(name)); err != nil {
 		return "", "", err
 	}
 	if base != "" {
@@ -116,11 +119,13 @@ func AddWorktree(repoRoot, name, base, dir string, hookOut io.Writer) (branch, p
 // Post-create hooks run exactly as for AddWorktree: on hook failure the
 // returned path is still valid and err is a *HookFailedError.
 func AddExistingBranch(repoRoot, branch string, hookOut io.Writer) (path string, err error) {
-	if _, err := config.DirName(branch); err != nil {
-		return "", err
-	}
 	cfg, err := config.Load(repoRoot)
 	if err != nil {
+		return "", err
+	}
+	// Same bare-name validation as AddWorktree, for symmetry. (Existing git
+	// branch names can't be degenerate, but the guard is cheap.)
+	if _, err := config.DirName(cfg.Create.BareName(branch)); err != nil {
 		return "", err
 	}
 	path = cfg.Create.WorktreeDir(repoRoot, branch)

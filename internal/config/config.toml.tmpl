@@ -13,6 +13,7 @@ base_branch = "{{ .Create.BaseBranch }}"
 dir = "{{ .Create.Dir }}"
 
 # Branch name = prefix + separator + name (e.g. "jl" + "/" + "foo").
+# Names typed with the prefix already in place are not prefixed again.
 branch_prefix = "{{ .Create.BranchPrefix }}"
 branch_separator = "{{ .Create.BranchSeparator }}"
 
