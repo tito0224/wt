@@ -59,7 +59,7 @@ jobs:
         # Best-effort: on any Models failure the release falls back to
         # GitHub's auto-generated notes below.
         continue-on-error: true
-        uses: actions/ai-inference@v1
+        uses: actions/ai-inference@v2
         with:
           system-prompt: >
             You write concise, accurate release notes for wt, a Go CLI that
