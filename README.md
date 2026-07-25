@@ -125,10 +125,17 @@ no env form (lists don't map cleanly to a single variable).
 
 `create.run` commands run inside the new worktree after `wt add` (or the
 TUI's add screen) creates it — for both new and existing branches. Each
-command sees `WT_WORKTREE` (the worktree path), `WT_BRANCH`, and
-`WT_REPO_ROOT` in its environment. The first failing command stops the
-sequence; the worktree is **kept** either way and the failure is reported.
-From the CLI, hook output streams live to stderr.
+command's environment includes:
+
+| Variable | Value |
+|----------|-------|
+| `WT_WORKTREE` | absolute path of the new worktree (also the working directory) |
+| `WT_BRANCH` | branch checked out in it (e.g. `jl/foo`) |
+| `WT_REPO_ROOT` | absolute path of the repository the worktree was added from |
+
+The first failing command stops the sequence; the worktree is **kept**
+either way and the failure is reported. From the CLI, hook output streams
+live to stderr.
 
 Note that a repo-local `.wt.toml` can run arbitrary commands via this key —
 the same trust model as npm scripts or direnv. Only create worktrees in

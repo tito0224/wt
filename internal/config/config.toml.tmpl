@@ -18,8 +18,11 @@ branch_separator = "{{ .Create.BranchSeparator }}"
 
 # Post-create hooks: commands run (via `sh -c`) inside a newly created
 # worktree, in order. The first failure stops the sequence; the worktree is
-# kept either way. Hooks see WT_WORKTREE, WT_BRANCH, and WT_REPO_ROOT.
-# Example: run = ["cp ../.env .", "npm install"]
+# kept either way. Each command's environment includes:
+#   WT_WORKTREE  - absolute path of the new worktree (also the working dir)
+#   WT_BRANCH    - branch checked out in it (e.g. "jl/foo")
+#   WT_REPO_ROOT - absolute path of the repository the worktree was added from
+# Example: run = ["cp $WT_REPO_ROOT/.env .", "npm install"]
 run = [{{ range $i, $c := .Create.Run }}{{ if $i }}, {{ end }}{{ printf "%q" $c }}{{ end }}]
 
 [launch]
