@@ -114,6 +114,26 @@ func TestRefreshClearsCacheAndReselects(t *testing.T) {
 	}
 }
 
+// TestYankCopiesSelectedPath pins the y key: it copies the selected
+// worktree's path via the (stubbed) clipboard and reports success; in
+// remove-confirm mode y still means "confirm" (handled before normal keys).
+func TestYankCopiesSelectedPath(t *testing.T) {
+	initStyles(lipgloss.DefaultRenderer())
+	var copied string
+	old := clipboardWrite
+	clipboardWrite = func(s string) error { copied = s; return nil }
+	defer func() { clipboardWrite = old }()
+
+	m := &model{width: 80, height: 24, rows: rowsFixture()}
+	m.updateNormal(runeKey('y'))
+	if want := m.rows[0].wt.Path; copied != want {
+		t.Fatalf("copied %q, want selected path %q", copied, want)
+	}
+	if m.isErr || m.message == "" {
+		t.Fatalf("expected success message, got isErr=%v message=%q", m.isErr, m.message)
+	}
+}
+
 func TestNormalShortcutsNotFilter(t *testing.T) {
 	initStyles(lipgloss.DefaultRenderer())
 	m := &model{width: 80, height: 24, rows: rowsFixture()}

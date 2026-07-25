@@ -25,6 +25,7 @@ var helpEntries = []helpEntry{
 	{"tab / → / l", "open the details screen"},
 	{"esc / tab / h", "leave the details screen"},
 	{"r", "remove the worktree (asks to confirm)"},
+	{"y", "copy the worktree path to the clipboard"},
 	{"R", "refresh worktrees and statuses"},
 	{"/", "search / filter"},
 	{"j / k / ↑ / ↓", "move selection"},

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tito0224/wt/internal/browser"
 	"github.com/tito0224/wt/internal/git"
@@ -62,15 +63,27 @@ func (m *model) handleLoadResult(msg loadResultMsg) (tea.Model, tea.Cmd) {
 	return m, m.scheduleDetail()
 }
 
+// clipboardWrite copies text to the system clipboard. A variable so tests can
+// stub it (the real call shells out to pbcopy/xclip, which is unavailable on
+// headless CI).
+var clipboardWrite = clipboard.WriteAll
+
 // runAction dispatches a keybar action for the selected worktree. "cd" quits
 // and hands the path back to Run; "open" launches a terminal tab; "openpr"
-// opens the PR in a browser; "remove" opens the confirmation prompt.
+// opens the PR in a browser; "yank" copies the worktree path to the
+// clipboard; "remove" opens the confirmation prompt.
 func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 	wt, ok := m.selected()
 	if !ok {
 		return m, nil
 	}
 	switch id {
+	case "yank":
+		if err := clipboardWrite(wt.Path); err != nil {
+			m.setErr(fmt.Sprintf("copy failed: %v", err))
+			return m, nil
+		}
+		m.setMsg(fmt.Sprintf("copied %s", abbrevHome(wt.Path)))
 	case "open":
 		adapter, err := terminal.Resolve(m.terminalName)
 		if err != nil {
