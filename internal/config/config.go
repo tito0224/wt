@@ -37,6 +37,15 @@ type Create struct {
 	BranchPrefix string `toml:"branch_prefix"`
 	// BranchSeparator joins the prefix and the name. Defaults to "/".
 	BranchSeparator string `toml:"branch_separator"`
+	// Run lists post-create hook commands, executed in order inside a newly
+	// created worktree (via `sh -c`) — typically environment setup that every
+	// fresh worktree needs (copying .env files, installing dependencies).
+	// The first failing command stops the sequence; the worktree is kept
+	// either way. There is no WT_* env equivalent (lists don't map cleanly
+	// to a single variable); configure it in a file. Note that TOML decoding
+	// replaces the whole list, so a repo-local run overrides — not appends
+	// to — a global one.
+	Run []string `toml:"run"`
 }
 
 // Launch holds defaults for opening a worktree in an editor/agent.

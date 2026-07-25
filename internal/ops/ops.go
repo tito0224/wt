@@ -12,10 +12,60 @@ package ops
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 
 	"github.com/tito0224/wt/internal/config"
 	"github.com/tito0224/wt/internal/git"
 )
+
+// HookFailedError reports that a worktree was created successfully but one of
+// its post-create hook commands (config `create.run`) failed. The worktree is
+// intentionally kept — the user's setup may be half-done, but discarding a
+// freshly created worktree over a hook failure would be worse. Frontends test
+// for it with errors.As and present "created, but…" rather than a hard
+// failure.
+type HookFailedError struct {
+	// Command is the hook command line that failed.
+	Command string
+	// Err is the underlying execution error (typically an exit status).
+	Err error
+}
+
+func (e *HookFailedError) Error() string {
+	return fmt.Sprintf("post-create hook %q: %v", e.Command, e.Err)
+}
+
+func (e *HookFailedError) Unwrap() error { return e.Err }
+
+// runCreateHooks executes the configured post-create commands inside the new
+// worktree, in order, stopping at the first failure. Commands run via
+// `sh -c` so shell syntax (redirection, &&, env expansion) works as users
+// expect from hook-style config. Combined output is streamed to out (the CLI
+// passes stderr for live feedback; the TUI captures into a buffer). Hooks see
+// the worktree context via WT_WORKTREE, WT_BRANCH, and WT_REPO_ROOT.
+func runCreateHooks(repoRoot, path, branch string, cmds []string, out io.Writer) error {
+	if out == nil {
+		out = io.Discard
+	}
+	for _, line := range cmds {
+		fmt.Fprintf(out, "wt: run: %s\n", line)
+		cmd := exec.Command("sh", "-c", line)
+		cmd.Dir = path
+		cmd.Env = append(os.Environ(),
+			"WT_WORKTREE="+path,
+			"WT_BRANCH="+branch,
+			"WT_REPO_ROOT="+repoRoot,
+		)
+		cmd.Stdout = out
+		cmd.Stderr = out
+		if err := cmd.Run(); err != nil {
+			return &HookFailedError{Command: line, Err: err}
+		}
+	}
+	return nil
+}
 
 // AddWorktree creates a new worktree named `name` in the repository containing
 // repoRoot, using config defaults for the base branch, target directory, and
@@ -25,7 +75,12 @@ import (
 // The worktree's directory is a single flat component derived from name (see
 // config.DirName); degenerate names are rejected here, before any directory
 // or branch is created.
-func AddWorktree(repoRoot, name, base, dir string) (branch, path string, err error) {
+//
+// After creation, the configured post-create hooks (config `create.run`) are
+// executed in the worktree with output streamed to hookOut (nil discards).
+// When a hook fails, the returned branch and path are still valid — the
+// worktree exists — and err is a *HookFailedError.
+func AddWorktree(repoRoot, name, base, dir string, hookOut io.Writer) (branch, path string, err error) {
 	if _, err := config.DirName(name); err != nil {
 		return "", "", err
 	}
@@ -48,7 +103,7 @@ func AddWorktree(repoRoot, name, base, dir string) (branch, path string, err err
 	if err := git.Add(repoRoot, path, branch, cfg.Create.BaseBranch); err != nil {
 		return "", "", err
 	}
-	return branch, path, nil
+	return branch, path, runCreateHooks(repoRoot, path, branch, cfg.Create.Run, hookOut)
 }
 
 // AddExistingBranch creates a new worktree checked out to an existing branch
@@ -57,7 +112,10 @@ func AddWorktree(repoRoot, name, base, dir string) (branch, path string, err err
 // config.DirName) under the configured dir template — no branch prefix is
 // applied, since the branch already exists. It returns the absolute worktree
 // path.
-func AddExistingBranch(repoRoot, branch string) (path string, err error) {
+//
+// Post-create hooks run exactly as for AddWorktree: on hook failure the
+// returned path is still valid and err is a *HookFailedError.
+func AddExistingBranch(repoRoot, branch string, hookOut io.Writer) (path string, err error) {
 	if _, err := config.DirName(branch); err != nil {
 		return "", err
 	}
@@ -69,7 +127,7 @@ func AddExistingBranch(repoRoot, branch string) (path string, err error) {
 	if err := git.AddExisting(repoRoot, path, branch); err != nil {
 		return "", err
 	}
-	return path, nil
+	return path, runCreateHooks(repoRoot, path, branch, cfg.Create.Run, hookOut)
 }
 
 // RemoveOptions controls a worktree removal.

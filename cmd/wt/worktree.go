@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -141,7 +142,17 @@ func newAddCmd() *cobra.Command {
 				return err
 			}
 
-			branch, path, err := ops.AddWorktree(top, name, base, dir)
+			// Hook output streams to stderr: with the shell wrapper, stdout is
+			// captured by $(...) until wt exits, so stderr is the only way to
+			// show hook progress live.
+			branch, path, err := ops.AddWorktree(top, name, base, dir, os.Stderr)
+			var hookErr *ops.HookFailedError
+			if errors.As(err, &hookErr) {
+				// The worktree exists; report the partial success, then the
+				// hook failure as the command's error (non-zero exit).
+				fmt.Printf("created worktree %s at %s\n", branch, path)
+				return err
+			}
 			if err != nil {
 				return err
 			}

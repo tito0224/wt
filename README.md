@@ -110,11 +110,29 @@ dir = "../{repo}-worktrees"
 # Branch name = prefix + separator + name (e.g. "jl" + "/" + "foo" -> jl/foo).
 branch_prefix = "jl"
 branch_separator = "/"
+
+# Post-create hooks: commands run (via `sh -c`) inside a newly created
+# worktree, in order — e.g. copying env files or installing dependencies.
+run = ["cp ../.env .", "npm install"]
 ```
 
 Environment equivalents: `WT_BASE_BRANCH`, `WT_DIR`, `WT_BRANCH_PREFIX`,
 `WT_BRANCH_SEPARATOR`, `WT_LAUNCHER` (maps to `launch.default`), and
-`WT_OPENCODE_WEB_URL` (maps to `launch.opencode_web_url`).
+`WT_OPENCODE_WEB_URL` (maps to `launch.opencode_web_url`). `create.run` has
+no env form (lists don't map cleanly to a single variable).
+
+### Post-create hooks
+
+`create.run` commands run inside the new worktree after `wt add` (or the
+TUI's add screen) creates it — for both new and existing branches. Each
+command sees `WT_WORKTREE` (the worktree path), `WT_BRANCH`, and
+`WT_REPO_ROOT` in its environment. The first failing command stops the
+sequence; the worktree is **kept** either way and the failure is reported.
+From the CLI, hook output streams live to stderr.
+
+Note that a repo-local `.wt.toml` can run arbitrary commands via this key —
+the same trust model as npm scripts or direnv. Only create worktrees in
+repositories you trust.
 
 ### Interactive keys
 
