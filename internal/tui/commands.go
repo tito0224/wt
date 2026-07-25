@@ -27,6 +27,48 @@ func loadCmd(dir string) tea.Cmd {
 	}
 }
 
+// prunableCount returns how many worktrees are stale administrative entries
+// (directory deleted manually; git flags them prunable).
+func (m *model) prunableCount() int {
+	n := 0
+	for _, w := range m.all {
+		if w.Prunable {
+			n++
+		}
+	}
+	return n
+}
+
+// doPrune (the P key) removes stale worktree entries, then reloads the list
+// like a refresh. It is a no-op when nothing is prunable.
+func (m *model) doPrune() (tea.Model, tea.Cmd) {
+	n := m.prunableCount()
+	if n == 0 {
+		m.setMsg("nothing to prune")
+		return m, nil
+	}
+	m.pendingSelect = m.selectedPath()
+	// Shown once the reload lands (startBusy clears any current message).
+	m.pendingMsg = fmt.Sprintf("pruned %d stale entr%s", n, pluralY(n))
+	dir := m.dir
+	cmd := func() tea.Msg {
+		if err := git.Prune(dir); err != nil {
+			return loadResultMsg{err: err}
+		}
+		wts, err := git.ListWorktrees(dir)
+		return loadResultMsg{wts: wts, err: err}
+	}
+	return m, tea.Batch(m.startBusy("pruning…"), cmd)
+}
+
+// pluralY returns "y" or "ies" for entry/entries-style messages.
+func pluralY(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
+}
+
 // startRefresh (the R key) reloads the worktree list and drops the whole
 // per-worktree detail cache — statuses and PRs go stale as the user works in
 // other terminals, and nothing else ever invalidates them mid-session. The
@@ -47,6 +89,7 @@ func (m *model) handleLoadResult(msg loadResultMsg) (tea.Model, tea.Cmd) {
 	m.spinner.msg = ""
 	if msg.err != nil {
 		m.pendingSelect = ""
+		m.pendingMsg = ""
 		m.setErr(msg.err.Error())
 		return m, nil
 	}
@@ -58,6 +101,12 @@ func (m *model) handleLoadResult(msg loadResultMsg) (tea.Model, tea.Cmd) {
 	if m.pendingSelect != "" {
 		m.selectByPath(m.pendingSelect)
 		m.pendingSelect = ""
+	}
+	// Deliver the parked result message of the action that triggered this
+	// load (e.g. "pruned N stale entries").
+	if m.pendingMsg != "" {
+		m.setMsg(m.pendingMsg)
+		m.pendingMsg = ""
 	}
 	// Load detail for the selected worktree.
 	return m, m.scheduleDetail()

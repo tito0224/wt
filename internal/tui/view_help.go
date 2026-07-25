@@ -27,6 +27,7 @@ var helpEntries = []helpEntry{
 	{"r", "remove the worktree (asks to confirm)"},
 	{"y", "copy the worktree path to the clipboard"},
 	{"R", "refresh worktrees and statuses"},
+	{"P", "prune stale worktree entries (directory deleted manually)"},
 	{"/", "search / filter"},
 	{"j / k / ↑ / ↓", "move selection"},
 	{"g / G", "jump to top / bottom"},

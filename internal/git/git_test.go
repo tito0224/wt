@@ -517,6 +517,47 @@ func TestAddTracking(t *testing.T) {
 	}
 }
 
+// TestPrune pins the prunable round-trip: a manually deleted worktree dir is
+// flagged Prunable by ListWorktrees, and Prune drops the stale entry.
+func TestPrune(t *testing.T) {
+	dir := newTestRepo(t)
+	wtPath := filepath.Join(filepath.Dir(dir), "gone-wt")
+	mustGit(t, dir, "worktree", "add", "-b", "gone", wtPath)
+	if err := os.RemoveAll(wtPath); err != nil {
+		t.Fatal(err)
+	}
+
+	wts, err := ListWorktrees(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, w := range wts {
+		if w.Branch == "gone" {
+			found = true
+			if !w.Prunable {
+				t.Error("deleted worktree not flagged Prunable")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("stale worktree missing from list: %+v", wts)
+	}
+
+	if err := Prune(dir); err != nil {
+		t.Fatal(err)
+	}
+	wts, err = ListWorktrees(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range wts {
+		if w.Branch == "gone" {
+			t.Fatalf("stale entry survived Prune: %+v", w)
+		}
+	}
+}
+
 func TestDefaultBranch(t *testing.T) {
 	dir := newTestRepo(t)
 	// No remotes exist, so the remote-HEAD probe must fall through to the

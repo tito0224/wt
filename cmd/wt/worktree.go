@@ -186,6 +186,55 @@ func newAddCmd() *cobra.Command {
 	return cmd
 }
 
+func newPruneCmd() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Remove stale worktree entries (directories deleted manually)",
+		Long: "Remove git's administrative records for worktrees whose " +
+			"directories no longer exist (e.g. deleted with rm -rf instead of " +
+			"`wt remove`). Never touches working files.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, wts, err := loadWorktrees()
+			if err != nil {
+				return err
+			}
+			var stale []git.Worktree
+			for _, w := range wts {
+				if w.Prunable {
+					stale = append(stale, w)
+				}
+			}
+			if len(stale) == 0 {
+				fmt.Println("nothing to prune")
+				return nil
+			}
+			for _, w := range stale {
+				fmt.Printf("prunable: %s (%s)\n", w.Label(), w.Path)
+			}
+			if dryRun {
+				return nil
+			}
+			if err := git.Prune(dir); err != nil {
+				return err
+			}
+			fmt.Printf("pruned %d worktree entr%s\n", len(stale), pluralY(len(stale)))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "list prunable entries without removing them")
+	return cmd
+}
+
+// pluralY returns "y" or "ies" for entry/entries-style messages.
+func pluralY(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
+}
+
 func newRemoveCmd() *cobra.Command {
 	var (
 		force        bool
