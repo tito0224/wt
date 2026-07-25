@@ -1,0 +1,11 @@
+# Weekly dependency bumps for Go modules and the Actions used in workflows.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

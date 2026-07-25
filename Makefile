@@ -79,6 +79,10 @@ dist:
 	done
 	cd dist && shasum -a 256 *.tar.gz > checksums.txt
 
+# Regenerate the README demo GIF (requires vhs: brew install vhs).
+demo:
+	vhs docs/demo.tape
+
 # Point git at the repo's hooks (pre-commit runs the fast checks).
 hooks:
 	git config core.hooksPath .githooks
