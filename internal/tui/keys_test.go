@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -131,6 +132,41 @@ func TestYankCopiesSelectedPath(t *testing.T) {
 	}
 	if m.isErr || m.message == "" {
 		t.Fatalf("expected success message, got isErr=%v message=%q", m.isErr, m.message)
+	}
+}
+
+// TestPruneBannerAndKey pins the prune surfacing: a banner appears when (and
+// only when) stale entries exist, P starts the async prune, and P with
+// nothing to prune is an inline no-op.
+func TestPruneBannerAndKey(t *testing.T) {
+	initStyles(lipgloss.DefaultRenderer())
+
+	// No prunable entries: no banner, P is a no-op message.
+	m := &model{width: 80, height: 24, rows: rowsFixture()}
+	if frame := m.viewListRender(); strings.Contains(frame, "prunable entr") {
+		t.Error("banner shown with nothing prunable")
+	}
+	m.updateNormal(runeKey('P'))
+	if m.spinner.active {
+		t.Error("P with nothing prunable must not start a prune")
+	}
+
+	// With a prunable entry: banner + P starts the busy prune.
+	m = &model{width: 80, height: 24}
+	m.all = []git.Worktree{
+		{Path: "/r/main", Branch: "main", Current: true},
+		{Path: "/r/gone", Branch: "gone", Prunable: true},
+	}
+	m.recompute()
+	if frame := m.viewListRender(); !strings.Contains(frame, "1 prunable entry") {
+		t.Errorf("banner missing:\n%s", frame)
+	}
+	_, cmd := m.updateNormal(runeKey('P'))
+	if !m.spinner.active || cmd == nil {
+		t.Errorf("P did not start the prune (busy=%v cmd=%v)", m.spinner.active, cmd)
+	}
+	if m.pendingMsg == "" {
+		t.Error("expected a parked result message for after the reload")
 	}
 }
 

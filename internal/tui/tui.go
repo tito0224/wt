@@ -223,6 +223,11 @@ type model struct {
 	// completes. Set by the refresh action (R) so the cursor doesn't jump to
 	// the top when the reloaded set arrives; consumed in handleLoadResult.
 	pendingSelect string
+	// pendingMsg is a success message to show once the next load completes.
+	// Actions that end in a reload (e.g. prune) park their result message
+	// here because startBusy clears the live one; consumed in
+	// handleLoadResult.
+	pendingMsg string
 
 	selectedRow int // index of the highlighted worktree row
 	offset      int // scroll offset (first visible row)
@@ -490,7 +495,11 @@ func (m *model) recompute() {
 //
 // which is 10 lines. When the terminal is very short, at least one row is shown.
 func (m *model) visibleRows() int {
-	const chrome = 10
+	chrome := 10
+	// The prune banner occupies one extra line when stale entries exist.
+	if m.prunableCount() > 0 {
+		chrome++
+	}
 	n := m.height - chrome
 	if n < 1 {
 		n = 1

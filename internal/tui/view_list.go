@@ -100,6 +100,8 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.runAction("remove")
 		case "R":
 			return m.startRefresh()
+		case "P":
+			return m.doPrune()
 		case "?":
 			m.helpReturn = viewList
 			m.view = viewHelp
@@ -163,6 +165,14 @@ func (m *model) viewListRender() string {
 		title += fmt.Sprintf("  —  %d match", len(m.rows))
 	}
 	b.WriteString(titleStyle.Render(title) + "\n")
+
+	// Prune notice: stale entries are rare and their only useful action is
+	// pruning, so surface it as an actionable banner rather than reordering
+	// the list (which keeps git's native order).
+	if n := m.prunableCount(); n > 0 {
+		b.WriteString(dirtyStyle.Render(fmt.Sprintf("%d prunable entr%s (directory missing)", n, pluralY(n))) +
+			helpStyle.Render("  —  press ") + keycapStyle.Render(" P ") + helpStyle.Render(" to prune") + "\n")
+	}
 
 	// Filter/search line.
 	switch {

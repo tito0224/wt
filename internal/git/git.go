@@ -579,6 +579,14 @@ func AddTracking(dir, path, branch, remoteRef string) error {
 	return err
 }
 
+// Prune removes stale worktree administrative entries — records of worktrees
+// whose directories no longer exist (deleted manually rather than via
+// `git worktree remove`). It never touches working files.
+func Prune(dir string) error {
+	_, err := run(dir, "worktree", "prune")
+	return err
+}
+
 // ensureParent creates the parent directory of path if needed.
 func ensureParent(path string) error {
 	if parent := filepath.Dir(path); parent != "" {
