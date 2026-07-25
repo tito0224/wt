@@ -111,7 +111,7 @@ type Branch struct {
 	// elsewhere cannot be added to a new worktree.
 	CheckedOutAt string
 	// Remote is the remote name for a remote-tracking branch (e.g. "origin"),
-	// empty for a local branch. Reserved for upcoming remote-branch support.
+	// empty for a local branch.
 	Remote string
 }
 
@@ -121,28 +121,54 @@ func (b Branch) IsRemote() bool { return b.Remote != "" }
 // InUse reports whether the branch is already checked out in some worktree.
 func (b Branch) InUse() bool { return b.CheckedOutAt != "" }
 
-// LocalBranches lists the repository's local branches, most-recently-committed
-// first, annotated with whether each is currently checked out in a worktree.
-func LocalBranches(dir string) ([]Branch, error) {
+// FullName returns the ref-style display name: "origin/foo" for a
+// remote-tracking branch, the plain branch name for a local one.
+func (b Branch) FullName() string {
+	if b.Remote != "" {
+		return b.Remote + "/" + b.Name
+	}
+	return b.Name
+}
+
+// Branches lists the repository's local branches followed by its
+// remote-tracking branches, each group most-recently-committed first. Local
+// branches are annotated with the worktree they are checked out in, if any.
+// Remote entries reflect the refs git already has locally — a `git fetch` is
+// the user's job if they want fresher ones. The symbolic <remote>/HEAD entry
+// is excluded (it duplicates the remote's default branch).
+func Branches(dir string) ([]Branch, error) {
+	// Full refnames (not :short) so local and remote refs are distinguishable
+	// unambiguously even when a local branch is literally named "origin/x".
 	out, err := run(dir, "for-each-ref",
 		"--sort=-committerdate",
-		"--format=%(refname:short)%00%(worktreepath)",
-		"refs/heads")
+		"--format=%(refname)%00%(worktreepath)",
+		"refs/heads", "refs/remotes")
 	if err != nil {
 		return nil, err
 	}
-	var branches []Branch
+	var locals, remotes []Branch
 	for _, line := range strings.Split(out, "\n") {
 		if line == "" {
 			continue
 		}
-		name, wtPath, _ := strings.Cut(line, "\x00")
-		if name == "" {
-			continue
+		ref, wtPath, _ := strings.Cut(line, "\x00")
+		switch {
+		case strings.HasPrefix(ref, "refs/heads/"):
+			locals = append(locals, Branch{
+				Name:         strings.TrimPrefix(ref, "refs/heads/"),
+				CheckedOutAt: wtPath,
+			})
+		case strings.HasPrefix(ref, "refs/remotes/"):
+			remote, name, ok := strings.Cut(strings.TrimPrefix(ref, "refs/remotes/"), "/")
+			if !ok || name == "HEAD" {
+				continue
+			}
+			remotes = append(remotes, Branch{Name: name, Remote: remote})
 		}
-		branches = append(branches, Branch{Name: name, CheckedOutAt: wtPath})
 	}
-	return branches, nil
+	// Locals first: they are the more likely pick, and a stable partition
+	// keeps each group in recency order.
+	return append(locals, remotes...), nil
 }
 
 // commitFormat requests a commit's fields separated by NUL bytes (%x00) so any
@@ -539,6 +565,17 @@ func AddExisting(dir, path, branch string) error {
 		return err
 	}
 	_, err := run(dir, "worktree", "add", path, branch)
+	return err
+}
+
+// AddTracking creates a worktree at path on a newly created local branch that
+// tracks the given remote-tracking ref (e.g. branch "feat/x" tracking
+// "origin/feat/x"). The parent directory of path is created if necessary.
+func AddTracking(dir, path, branch, remoteRef string) error {
+	if err := ensureParent(path); err != nil {
+		return err
+	}
+	_, err := run(dir, "worktree", "add", "--track", "-b", branch, path, remoteRef)
 	return err
 }
 

@@ -122,16 +122,38 @@ func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// loadBranchesCmd lists local branches for the add screen off the main loop.
+// loadBranchesCmd lists the branches offered on the add screen — local ones
+// plus unshadowed remote-tracking ones — off the main loop.
 func loadBranchesCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
 		top, err := git.TopLevel(dir)
 		if err != nil {
 			return branchListMsg{err: err}
 		}
-		branches, err := git.LocalBranches(top)
-		return branchListMsg{branches: branches, err: err}
+		branches, err := git.Branches(top)
+		return branchListMsg{branches: filterShadowedRemotes(branches), err: err}
 	}
+}
+
+// filterShadowedRemotes drops remote-tracking branches that have a local
+// branch of the same name: for those, adding the local branch is the right
+// action, and it is already in the list. Everything else passes through in
+// order.
+func filterShadowedRemotes(branches []git.Branch) []git.Branch {
+	local := make(map[string]bool)
+	for _, b := range branches {
+		if !b.IsRemote() {
+			local[b.Name] = true
+		}
+	}
+	out := branches[:0]
+	for _, b := range branches {
+		if b.IsRemote() && local[b.Name] {
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 // handleBranchList stores the loaded branches and rebuilds the create rows.
@@ -223,6 +245,31 @@ func (m *model) doAddExisting(branch string) (tea.Model, tea.Cmd) {
 			err: decorateHookErr(err, hookOut.String())}
 	}
 	return m, tea.Batch(m.startBusy(fmt.Sprintf("adding %s…", branch)), cmd)
+}
+
+// doAddRemote kicks off asynchronous creation of a worktree for a
+// remote-tracking branch: a local branch named after it, tracking it.
+// Completion arrives as createResultMsg.
+func (m *model) doAddRemote(br git.Branch) (tea.Model, tea.Cmd) {
+	m.view = viewList
+	m.create = createState{}
+	dir := m.dir
+
+	cmd := func() tea.Msg {
+		top, err := git.TopLevel(dir)
+		if err != nil {
+			return createResultMsg{err: err}
+		}
+		var hookOut bytes.Buffer
+		path, err := ops.AddRemoteBranch(top, br.Remote, br.Name, &hookOut)
+		if err != nil && !isHookFailure(err) {
+			return createResultMsg{err: err}
+		}
+		wts, _ := git.ListWorktrees(top)
+		return createResultMsg{branch: br.Name, path: path, wts: wts,
+			err: decorateHookErr(err, hookOut.String())}
+	}
+	return m, tea.Batch(m.startBusy(fmt.Sprintf("adding %s…", br.FullName())), cmd)
 }
 
 // handleCreateResult applies the outcome of an async creation: on success it

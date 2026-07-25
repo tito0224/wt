@@ -74,6 +74,29 @@ func findWorktree(wts []git.Worktree, query string) (*git.Worktree, error) {
 	}
 }
 
+// matchRemoteBranch reports whether name exactly names a remote-tracking
+// branch (e.g. "origin/foo") that has no local branch of the same short name.
+// Used by `wt add` to do-what-I-mean: such a name asks for a local tracking
+// branch, not a brand-new branch that happens to be called "origin/foo".
+func matchRemoteBranch(repoRoot, name string) (git.Branch, bool) {
+	branches, err := git.Branches(repoRoot)
+	if err != nil {
+		return git.Branch{}, false
+	}
+	local := make(map[string]bool)
+	for _, b := range branches {
+		if !b.IsRemote() {
+			local[b.Name] = true
+		}
+	}
+	for _, b := range branches {
+		if b.IsRemote() && b.FullName() == name && !local[b.Name] {
+			return b, true
+		}
+	}
+	return git.Branch{}, false
+}
+
 // orNone renders an empty string as "(unset)" for display.
 func orNone(s string) string {
 	if s == "" {

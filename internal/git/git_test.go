@@ -435,36 +435,85 @@ func TestDeleteBranch(t *testing.T) {
 	}
 }
 
-func TestLocalBranches(t *testing.T) {
+// addTestRemote registers a bare clone of dir as "origin", pushes all local
+// branches, creates one remote-only branch, and fetches so remote-tracking
+// refs exist. It also sets origin/HEAD so the HEAD-exclusion path is covered.
+func addTestRemote(t *testing.T, dir string) {
+	t.Helper()
+	bare := filepath.Join(t.TempDir(), "origin.git")
+	mustGit(t, dir, "clone", "--bare", dir, bare)
+	mustGit(t, dir, "remote", "add", "origin", bare)
+	// A branch that exists only on the remote.
+	mustGit(t, dir, "branch", "remote-only")
+	mustGit(t, dir, "push", "-q", "origin", "--all")
+	mustGit(t, dir, "branch", "-D", "remote-only")
+	mustGit(t, dir, "fetch", "-q", "origin")
+	mustGit(t, dir, "remote", "set-head", "origin", "--auto")
+}
+
+func TestBranches(t *testing.T) {
 	dir := newTestRepo(t)
 	mustGit(t, dir, "branch", "idle")
 	wtPath := filepath.Join(filepath.Dir(dir), "feat-wt")
 	mustGit(t, dir, "worktree", "add", "-b", "feat", wtPath)
+	addTestRemote(t, dir)
 
-	branches, err := LocalBranches(dir)
+	branches, err := Branches(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	byName := make(map[string]Branch, len(branches))
+	byFull := make(map[string]Branch, len(branches))
 	for _, b := range branches {
-		byName[b.Name] = b
+		byFull[b.FullName()] = b
 	}
-	for _, name := range []string{"main", "idle", "feat"} {
-		if _, ok := byName[name]; !ok {
+	for _, name := range []string{"main", "idle", "feat", "origin/main", "origin/remote-only"} {
+		if _, ok := byFull[name]; !ok {
 			t.Errorf("branch %q missing from %+v", name, branches)
 		}
 	}
+	if _, ok := byFull["origin/HEAD"]; ok {
+		t.Error("origin/HEAD must be excluded")
+	}
 
-	if b := byName["feat"]; canonical(b.CheckedOutAt) != canonical(wtPath) {
+	// Locals first, remotes after (stable partition).
+	sawRemote := false
+	for _, b := range branches {
+		if b.IsRemote() {
+			sawRemote = true
+		} else if sawRemote {
+			t.Fatalf("local branch %q listed after a remote one: %+v", b.Name, branches)
+		}
+	}
+
+	if b := byFull["origin/remote-only"]; b.Remote != "origin" || b.Name != "remote-only" {
+		t.Errorf("remote-only = %+v, want Remote=origin Name=remote-only", b)
+	}
+	if b := byFull["feat"]; canonical(b.CheckedOutAt) != canonical(wtPath) {
 		t.Errorf("feat.CheckedOutAt = %q, want %q", b.CheckedOutAt, wtPath)
 	} else if !b.InUse() {
 		t.Error("feat.InUse() = false, want true")
 	}
-	if b := byName["idle"]; b.InUse() {
+	if b := byFull["idle"]; b.InUse() {
 		t.Errorf("idle.InUse() = true (CheckedOutAt=%q), want false", b.CheckedOutAt)
 	}
-	if b := byName["main"]; !b.InUse() {
+	if b := byFull["main"]; !b.InUse() {
 		t.Error("main.InUse() = false, want true (checked out in the main worktree)")
+	}
+}
+
+func TestAddTracking(t *testing.T) {
+	dir := newTestRepo(t)
+	addTestRemote(t, dir)
+
+	path := filepath.Join(filepath.Dir(dir), "tracked-wt")
+	if err := AddTracking(dir, path, "remote-only", "origin/remote-only"); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGit(t, path, "rev-parse", "--abbrev-ref", "HEAD"); got != "remote-only" {
+		t.Errorf("checked-out branch = %q, want remote-only", got)
+	}
+	if got := mustGit(t, path, "rev-parse", "--abbrev-ref", "@{upstream}"); got != "origin/remote-only" {
+		t.Errorf("upstream = %q, want origin/remote-only", got)
 	}
 }
 
