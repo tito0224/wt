@@ -13,7 +13,14 @@ STATICCHECK := honnef.co/go/tools/cmd/staticcheck@latest
 ERRCHECK    := github.com/kisielk/errcheck@latest
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@latest
 
-.PHONY: build test test-quick check fmt fmt-check vet staticcheck errcheck tidy-check vuln hooks
+# Version stamped into release artifacts (see dist). Defaults to git's
+# description of HEAD; the release workflow passes the tag explicitly.
+VERSION ?= $(shell git describe --tags --always --dirty)
+
+# Platforms release artifacts are built for.
+DIST_PLATFORMS := darwin/arm64 darwin/amd64 linux/arm64 linux/amd64
+
+.PHONY: build test test-quick check fmt fmt-check vet staticcheck errcheck tidy-check vuln dist hooks
 
 build:
 	$(GO) build ./...
@@ -53,6 +60,24 @@ vuln:
 
 # The full battery — identical to CI.
 check: build fmt-check vet staticcheck errcheck tidy-check vuln test
+
+# Cross-compiled release artifacts: dist/wt_<version>_<os>_<arch>.tar.gz plus
+# a checksums.txt. The version is injected via ldflags because GOOS/GOARCH
+# cross-builds don't get the toolchain's VCS stamping. CGO is disabled for
+# static, portable binaries.
+dist:
+	rm -rf dist && mkdir -p dist
+	@for p in $(DIST_PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; \
+		out="dist/wt_$(VERSION)_$${os}_$${arch}"; \
+		echo "building $$out.tar.gz"; \
+		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build -trimpath \
+			-ldflags "-s -w -X main.version=$(VERSION)" \
+			-o "$$out/wt" ./cmd/wt || exit 1; \
+		tar -C "$$out" -czf "$$out.tar.gz" wt; \
+		rm -r "$$out"; \
+	done
+	cd dist && shasum -a 256 *.tar.gz > checksums.txt
 
 # Point git at the repo's hooks (pre-commit runs the fast checks).
 hooks:
