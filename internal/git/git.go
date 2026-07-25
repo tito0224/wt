@@ -313,6 +313,31 @@ func TopLevel(dir string) (string, error) {
 	return run(dir, "rev-parse", "--show-toplevel")
 }
 
+// MainDir returns the main (primary) checkout root of the repository
+// containing dir. Unlike TopLevel — which returns the root of whichever
+// worktree dir is inside (main or linked) — MainDir always resolves to the
+// primary worktree's root. It does this by reading --git-common-dir: from a
+// linked worktree that returns the absolute path of the shared .git directory;
+// its parent is the main checkout root. From the main checkout it falls back
+// to --show-toplevel.
+//
+// Using MainDir for config loading, worktree directory computation, and
+// branch naming ensures consistency regardless of which worktree wt is run
+// from. TopLevel remains correct for identifying the current worktree
+// (markCurrent) since that needs the linked worktree root.
+func MainDir(dir string) (string, error) {
+	common, err := run(dir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(common) {
+		// Linked worktree: common is the absolute path of the main .git dir.
+		return filepath.Dir(common), nil
+	}
+	// Main worktree: common is a relative path like ".git".
+	return TopLevel(dir)
+}
+
 // RemoteURL returns the configured URL for the named remote (e.g. "origin"),
 // or an empty string when the remote is not configured.
 func RemoteURL(dir, name string) string {

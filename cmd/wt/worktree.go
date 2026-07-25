@@ -141,7 +141,7 @@ func newAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			top, err := git.TopLevel(repo)
+			top, err := git.MainDir(repo)
 			if err != nil {
 				return err
 			}

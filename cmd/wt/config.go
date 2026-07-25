@@ -48,7 +48,7 @@ func newConfigShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := repoDir()
 			root := dir
-			if top, err := git.TopLevel(dir); err == nil {
+			if top, err := git.MainDir(dir); err == nil {
 				root = top
 			}
 			cfg, err := config.Load(root)
@@ -93,7 +93,7 @@ func newConfigInitCmd() *cobra.Command {
 
 			// Determine repo root (if any).
 			root := ""
-			if top, err := git.TopLevel(repoDir()); err == nil {
+			if top, err := git.MainDir(repoDir()); err == nil {
 				root = top
 			}
 

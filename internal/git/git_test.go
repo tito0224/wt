@@ -361,6 +361,46 @@ func TestListWorktrees(t *testing.T) {
 	}
 }
 
+func TestMainDir(t *testing.T) {
+	repo := newTestRepo(t)
+
+	// From the main checkout, MainDir must match TopLevel.
+	main, err := MainDir(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	top, err := TopLevel(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if main != top {
+		t.Errorf("MainDir(%q) = %q, TopLevel = %q, want same", repo, main, top)
+	}
+
+	// Create a linked worktree.
+	wtPath := filepath.Join(filepath.Dir(repo), "linked")
+	mustGit(t, repo, "worktree", "add", "-b", "linked", wtPath)
+
+	// From the linked worktree, MainDir must still return the main checkout root.
+	linkedMain, err := MainDir(wtPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linkedMain != main {
+		t.Errorf("MainDir(%q) = %q, want main checkout %q", wtPath, linkedMain, main)
+	}
+
+	// TopLevel from the linked worktree must return the linked worktree root
+	// (not the main checkout root — this is the distinguishing behaviour).
+	linkedTop, err := TopLevel(wtPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linkedTop == main {
+		t.Errorf("TopLevel(%q) = %q, should differ from main checkout root %q", wtPath, linkedTop, main)
+	}
+}
+
 func TestAddAddExistingRemove(t *testing.T) {
 	dir := newTestRepo(t)
 

@@ -188,7 +188,7 @@ func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 // plus unshadowed remote-tracking ones — off the main loop.
 func loadBranchesCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
-		top, err := git.TopLevel(dir)
+		top, err := git.MainDir(dir)
 		if err != nil {
 			return branchListMsg{err: err}
 		}
@@ -245,7 +245,7 @@ func (m *model) doCreate() (tea.Model, tea.Cmd) {
 	dir := m.dir
 
 	cmd := func() tea.Msg {
-		top, err := git.TopLevel(dir)
+		top, err := git.MainDir(dir)
 		if err != nil {
 			return createResultMsg{err: err}
 		}
@@ -293,7 +293,7 @@ func (m *model) doAddExisting(branch string) (tea.Model, tea.Cmd) {
 	dir := m.dir
 
 	cmd := func() tea.Msg {
-		top, err := git.TopLevel(dir)
+		top, err := git.MainDir(dir)
 		if err != nil {
 			return createResultMsg{err: err}
 		}
@@ -318,7 +318,7 @@ func (m *model) doAddRemote(br git.Branch) (tea.Model, tea.Cmd) {
 	dir := m.dir
 
 	cmd := func() tea.Msg {
-		top, err := git.TopLevel(dir)
+		top, err := git.MainDir(dir)
 		if err != nil {
 			return createResultMsg{err: err}
 		}

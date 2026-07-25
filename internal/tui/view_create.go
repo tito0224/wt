@@ -28,7 +28,7 @@ func (m *model) enterCreate() (tea.Model, tea.Cmd) {
 	// leave top empty; the preview then simply shows less detail.
 	top := ""
 	if m.dir != "" {
-		if t, err := git.TopLevel(m.dir); err == nil {
+		if t, err := git.MainDir(m.dir); err == nil {
 			top = t
 		}
 	}

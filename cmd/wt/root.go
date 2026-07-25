@@ -49,7 +49,7 @@ func runInteractive() error {
 	// Resolve launcher settings from config. Best-effort: an unreadable config
 	// just means defaults.
 	var defaultLauncher string
-	if top, err := git.TopLevel(dir); err == nil {
+	if top, err := git.MainDir(dir); err == nil {
 		if cfg, err := config.Load(top); err == nil {
 			defaultLauncher = cfg.Launch.Default
 			launcher.SetOpencodeWebOrigin(cfg.Launch.OpencodeWebURL)
