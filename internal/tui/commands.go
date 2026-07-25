@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -163,15 +165,40 @@ func (m *model) doCreate() (tea.Model, tea.Cmd) {
 		if err != nil {
 			return createResultMsg{err: err}
 		}
-		branch, path, err := ops.AddWorktree(top, name, "", "")
-		if err != nil {
+		var hookOut bytes.Buffer
+		branch, path, err := ops.AddWorktree(top, name, "", "", &hookOut)
+		if err != nil && !isHookFailure(err) {
 			return createResultMsg{err: err}
 		}
-		// Refresh from git so the new worktree is fully enriched (status, etc.).
+		// Refresh from git so the new worktree is fully enriched (status,
+		// etc.). On a hook failure the worktree still exists, so the refresh
+		// happens either way; err carries the hook error for the reducer.
 		wts, _ := git.ListWorktrees(top)
-		return createResultMsg{branch: branch, path: path, wts: wts}
+		return createResultMsg{branch: branch, path: path, wts: wts,
+			err: decorateHookErr(err, hookOut.String())}
 	}
 	return m, tea.Batch(m.startBusy(fmt.Sprintf("creating %s…", name)), cmd)
+}
+
+// isHookFailure reports whether err is a post-create hook failure — the
+// partial-success case where the worktree was created.
+func isHookFailure(err error) bool {
+	var hookErr *ops.HookFailedError
+	return errors.As(err, &hookErr)
+}
+
+// decorateHookErr appends the last line of the captured hook output to a hook
+// failure, since "exit status 1" alone gives the user nothing to act on. Other
+// (or nil) errors pass through unchanged.
+func decorateHookErr(err error, output string) error {
+	if err == nil || !isHookFailure(err) {
+		return err
+	}
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
+		return fmt.Errorf("%w — %s", err, last)
+	}
+	return err
 }
 
 // doAddExisting kicks off asynchronous creation of a worktree for an existing
@@ -186,23 +213,27 @@ func (m *model) doAddExisting(branch string) (tea.Model, tea.Cmd) {
 		if err != nil {
 			return createResultMsg{err: err}
 		}
-		path, err := ops.AddExistingBranch(top, branch)
-		if err != nil {
+		var hookOut bytes.Buffer
+		path, err := ops.AddExistingBranch(top, branch, &hookOut)
+		if err != nil && !isHookFailure(err) {
 			return createResultMsg{err: err}
 		}
 		wts, _ := git.ListWorktrees(top)
-		return createResultMsg{branch: branch, path: path, wts: wts}
+		return createResultMsg{branch: branch, path: path, wts: wts,
+			err: decorateHookErr(err, hookOut.String())}
 	}
 	return m, tea.Batch(m.startBusy(fmt.Sprintf("adding %s…", branch)), cmd)
 }
 
 // handleCreateResult applies the outcome of an async creation: on success it
 // swaps in the refreshed worktree set, clears the filter, and highlights the
-// new worktree; on failure it surfaces the error.
+// new worktree; on failure it surfaces the error. A hook failure is the
+// in-between: the worktree exists (msg.wts is populated), so the list updates
+// and the new worktree is selected, but the footer shows the hook error.
 func (m *model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 	m.spinner.active = false
 	m.spinner.msg = ""
-	if msg.err != nil {
+	if msg.err != nil && msg.wts == nil {
 		m.setErr(msg.err.Error())
 		return m, nil
 	}
@@ -212,6 +243,10 @@ func (m *model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 	m.list.filter = ""
 	m.recompute()
 	m.selectByPath(msg.path)
+	if msg.err != nil {
+		m.setErr(fmt.Sprintf("created %s, but %v", msg.branch, msg.err))
+		return m, m.scheduleDetail()
+	}
 	m.setMsg(fmt.Sprintf("created %s at %s", msg.branch, abbrevHome(msg.path)))
 	return m, m.scheduleDetail()
 }

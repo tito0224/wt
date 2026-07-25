@@ -61,6 +61,7 @@ func newConfigShowCmd() *cobra.Command {
 			fmt.Fprintf(w, "dir\t%s\n", orNone(c.Dir))
 			fmt.Fprintf(w, "branch_prefix\t%s\n", orNone(c.BranchPrefix))
 			fmt.Fprintf(w, "branch_separator\t%s\n", orNone(c.BranchSeparator))
+			fmt.Fprintf(w, "run\t%s\n", orNone(strings.Join(c.Run, " ; ")))
 			fmt.Fprintf(w, "launch_default\t%s\n", orNone(cfg.Launch.Default))
 			fmt.Fprintf(w, "opencode_web_url\t%s\n", orNone(cfg.Launch.OpencodeWebURL))
 			return w.Flush()

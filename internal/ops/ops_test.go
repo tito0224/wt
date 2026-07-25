@@ -117,7 +117,7 @@ func TestAddWorktreeUsesRepoConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	branch, path, err := AddWorktree(repo, "feat", "", "")
+	branch, path, err := AddWorktree(repo, "feat", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestAddWorktreeBaseOverride(t *testing.T) {
 	baseHead := mustGit(t, repo, "rev-parse", "base1")
 	mustGit(t, repo, "checkout", "main")
 
-	_, path, err := AddWorktree(repo, "from-base", "base1", "")
+	_, path, err := AddWorktree(repo, "from-base", "base1", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestAddExistingBranch(t *testing.T) {
 	repo := newTestRepo(t)
 	mustGit(t, repo, "branch", "existing")
 
-	path, err := AddExistingBranch(repo, "existing")
+	path, err := AddExistingBranch(repo, "existing", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestAddExistingBranchFlattensSlashes(t *testing.T) {
 	repo := newTestRepo(t)
 	mustGit(t, repo, "branch", "feat/x")
 
-	path, err := AddExistingBranch(repo, "feat/x")
+	path, err := AddExistingBranch(repo, "feat/x", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,12 +193,92 @@ func TestAddExistingBranchFlattensSlashes(t *testing.T) {
 	}
 }
 
+// TestPostCreateHooksRun pins the hook contract: commands run in order, via a
+// shell, inside the new worktree, with the WT_* context variables set.
+func TestPostCreateHooksRun(t *testing.T) {
+	repo := newTestRepo(t)
+	cfg := "[create]\nrun = [\"echo \\\"$WT_BRANCH\\\" > hook.txt\", \"touch second\"]\n"
+	if err := os.WriteFile(filepath.Join(repo, ".wt.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	branch, path, err := AddWorktree(repo, "hooked", "", "", &out)
+	if err != nil {
+		t.Fatalf("AddWorktree: %v\nhook output:\n%s", err, out.String())
+	}
+	// First hook ran in the worktree dir with WT_BRANCH set.
+	got, err := os.ReadFile(filepath.Join(path, "hook.txt"))
+	if err != nil {
+		t.Fatalf("hook.txt not written: %v", err)
+	}
+	if s := strings.TrimSpace(string(got)); s != branch {
+		t.Errorf("hook.txt = %q, want branch %q (WT_BRANCH expansion)", s, branch)
+	}
+	// Second hook ran after the first.
+	if _, err := os.Stat(filepath.Join(path, "second")); err != nil {
+		t.Errorf("second hook did not run: %v", err)
+	}
+	// Output stream announces each command.
+	if !strings.Contains(out.String(), "wt: run:") {
+		t.Errorf("hook output missing command announcements: %q", out.String())
+	}
+}
+
+// TestPostCreateHookFailure pins the partial-success contract: the worktree is
+// kept, the returned branch/path are valid, later hooks don't run, and the
+// error is a *HookFailedError.
+func TestPostCreateHookFailure(t *testing.T) {
+	repo := newTestRepo(t)
+	cfg := "[create]\nrun = [\"exit 3\", \"touch never\"]\n"
+	if err := os.WriteFile(filepath.Join(repo, ".wt.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	branch, path, err := AddWorktree(repo, "broken", "", "", nil)
+	var hookErr *HookFailedError
+	if !errors.As(err, &hookErr) {
+		t.Fatalf("err = %v, want *HookFailedError", err)
+	}
+	if hookErr.Command != "exit 3" {
+		t.Errorf("failed command = %q, want \"exit 3\"", hookErr.Command)
+	}
+	if branch == "" || path == "" {
+		t.Errorf("branch/path = %q/%q, want both populated on hook failure", branch, path)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Errorf("worktree was not kept after hook failure: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(path, "never")); !os.IsNotExist(statErr) {
+		t.Error("hook after the failing one still ran")
+	}
+}
+
+// TestAddExistingBranchRunsHooks verifies hooks apply to existing-branch adds
+// too — the two creation paths must not drift.
+func TestAddExistingBranchRunsHooks(t *testing.T) {
+	repo := newTestRepo(t)
+	mustGit(t, repo, "branch", "hooked-existing")
+	cfg := "[create]\nrun = [\"touch hooked\"]\n"
+	if err := os.WriteFile(filepath.Join(repo, ".wt.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := AddExistingBranch(repo, "hooked-existing", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(path, "hooked")); err != nil {
+		t.Errorf("hook did not run for existing-branch add: %v", err)
+	}
+}
+
 // TestAddWorktreeRejectsDegenerateNames ensures traversal-y and empty names
 // fail up front, before any branch or directory is created.
 func TestAddWorktreeRejectsDegenerateNames(t *testing.T) {
 	repo := newTestRepo(t)
 	for _, name := range []string{"", ".", ".."} {
-		if _, _, err := AddWorktree(repo, name, "", ""); err == nil {
+		if _, _, err := AddWorktree(repo, name, "", "", nil); err == nil {
 			t.Errorf("AddWorktree(%q) succeeded, want error", name)
 		}
 	}
@@ -213,7 +293,7 @@ func TestAddWorktreeRejectsDegenerateNames(t *testing.T) {
 // slashed branch (prefix + name is git's namespace) but a flat directory.
 func TestAddWorktreeFlattensSlashedName(t *testing.T) {
 	repo := newTestRepo(t)
-	branch, path, err := AddWorktree(repo, "team/feat", "", "")
+	branch, path, err := AddWorktree(repo, "team/feat", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +310,7 @@ func TestAddWorktreeFlattensSlashedName(t *testing.T) {
 
 func TestRemoveWorktreeDeletesMergedBranch(t *testing.T) {
 	repo := newTestRepo(t)
-	if _, _, err := AddWorktree(repo, "merged", "", ""); err != nil {
+	if _, _, err := AddWorktree(repo, "merged", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	wt := findWorktree(t, repo, "merged")
@@ -249,7 +329,7 @@ func TestRemoveWorktreeDeletesMergedBranch(t *testing.T) {
 
 func TestRemoveWorktreeReportsUnmergedBranch(t *testing.T) {
 	repo := newTestRepo(t)
-	if _, path, err := AddWorktree(repo, "wip", "", ""); err != nil {
+	if _, path, err := AddWorktree(repo, "wip", "", "", nil); err != nil {
 		t.Fatal(err)
 	} else {
 		// A commit on the branch that main doesn't have -> safe delete refused.
@@ -288,7 +368,7 @@ func TestRemoveWorktreeReportsUnmergedBranch(t *testing.T) {
 
 func TestRemoveWorktreeForceBranch(t *testing.T) {
 	repo := newTestRepo(t)
-	if _, path, err := AddWorktree(repo, "wip2", "", ""); err != nil {
+	if _, path, err := AddWorktree(repo, "wip2", "", "", nil); err != nil {
 		t.Fatal(err)
 	} else {
 		if err := os.WriteFile(filepath.Join(path, "w.txt"), []byte("w\n"), 0o644); err != nil {
@@ -310,7 +390,7 @@ func TestRemoveWorktreeForceBranch(t *testing.T) {
 
 func TestRemoveWorktreeDirtyNeedsForce(t *testing.T) {
 	repo := newTestRepo(t)
-	_, path, err := AddWorktree(repo, "dirty", "", "")
+	_, path, err := AddWorktree(repo, "dirty", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

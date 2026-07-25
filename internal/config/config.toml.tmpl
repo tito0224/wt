@@ -16,6 +16,12 @@ dir = "{{ .Create.Dir }}"
 branch_prefix = "{{ .Create.BranchPrefix }}"
 branch_separator = "{{ .Create.BranchSeparator }}"
 
+# Post-create hooks: commands run (via `sh -c`) inside a newly created
+# worktree, in order. The first failure stops the sequence; the worktree is
+# kept either way. Hooks see WT_WORKTREE, WT_BRANCH, and WT_REPO_ROOT.
+# Example: run = ["cp ../.env .", "npm install"]
+run = [{{ range $i, $c := .Create.Run }}{{ if $i }}, {{ end }}{{ printf "%q" $c }}{{ end }}]
+
 [launch]
 # Default editor/agent opened by the quick-launch key (e). One of the
 # launcher names shown by the picker (e.g. "code", "cursor", "zed",
