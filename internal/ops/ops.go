@@ -225,6 +225,18 @@ func RemoveWorktree(repoRoot string, wt git.Worktree, opts RemoveOptions) (Remov
 	return res, nil
 }
 
+// MoveWorktree moves a linked worktree to a new path. It refuses to move the
+// bare repository or the worktree the user is currently in.
+func MoveWorktree(repoRoot string, wt git.Worktree, newPath string) error {
+	if wt.Bare {
+		return ErrBare
+	}
+	if wt.Current {
+		return ErrCurrent
+	}
+	return git.Move(repoRoot, wt.Path, newPath)
+}
+
 // DeleteBranch deletes a branch in the repository containing repoRoot. It is
 // used for the force follow-up after a Remove reported BranchUnmerged.
 func DeleteBranch(repoRoot, branch string, force bool) error {

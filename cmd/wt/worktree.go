@@ -235,6 +235,33 @@ func pluralY(n int) string {
 	return "ies"
 }
 
+func newMoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "move <branch-or-path> <new-path>",
+		Aliases: []string{"mv"},
+		Short:   "Move a worktree to a new path",
+		Long: "Move a linked worktree to a different location, updating git's " +
+			"administrative records. The destination path may be absolute or " +
+			"relative to the current working directory.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, wts, err := loadWorktrees()
+			if err != nil {
+				return err
+			}
+			wt, err := findWorktree(wts, args[0])
+			if err != nil {
+				return err
+			}
+			if err := ops.MoveWorktree(dir, *wt, args[1]); err != nil {
+				return err
+			}
+			fmt.Printf("moved %s to %s\n", wt.Label(), args[1])
+			return nil
+		},
+	}
+}
+
 func newRemoveCmd() *cobra.Command {
 	var (
 		force        bool

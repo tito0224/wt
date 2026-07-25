@@ -24,6 +24,7 @@ var helpEntries = []helpEntry{
 	{"D", "git difftool"},
 	{"tab / → / l", "open the details screen"},
 	{"esc / tab / h", "leave the details screen"},
+	{"m", "move the worktree to a new path"},
 	{"r", "remove the worktree (asks to confirm)"},
 	{"y", "copy the worktree path to the clipboard"},
 	{"R", "refresh worktrees and statuses"},

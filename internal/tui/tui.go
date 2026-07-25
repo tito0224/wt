@@ -37,6 +37,7 @@ const (
 	viewList view = iota
 	viewDetail
 	viewCreate
+	viewMove
 	viewHelp
 	viewLaunch
 )
@@ -61,6 +62,14 @@ type createResultMsg struct {
 	path   string
 	wts    []git.Worktree
 	err    error
+}
+
+// moveResultMsg is delivered when an async worktree move finishes. On success
+// it carries the refreshed worktree set and the new worktree path.
+type moveResultMsg struct {
+	path string
+	wts  []git.Worktree
+	err  error
 }
 
 // removeResultMsg is delivered when an async worktree removal finishes. result
@@ -154,6 +163,13 @@ type createRow struct {
 // always selectable; a branch row is selectable unless it's already in use.
 func (r createRow) selectable() bool { return r.New || !r.branch.InUse() }
 
+// moveState is the move screen's state: the text input for the destination
+// path and the worktree being moved.
+type moveState struct {
+	input textinput.Model
+	wt    git.Worktree
+}
+
 // createState is the add screen's state: the text input (a bubbles textinput,
 // which handles cursor movement/editing), the list of existing local branches
 // (loaded async), and the filtered/selectable rows. Row 0 is always the "new
@@ -205,6 +221,7 @@ type model struct {
 	rows         []row // filtered view of `all`
 
 	list    listState
+	move    moveState
 	create  createState
 	spinner spinnerState
 	launch  launchState
@@ -324,6 +341,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleBranchList(msg)
 	case createResultMsg:
 		return m.handleCreateResult(msg)
+	case moveResultMsg:
+		return m.handleMoveResult(msg)
 	case removeResultMsg:
 		return m.handleRemoveResult(msg)
 	case branchDeleteResultMsg:
@@ -364,6 +383,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewCreate {
 			return m.updateCreate(msg)
 		}
+		if m.view == viewMove {
+			return m.updateMove(msg)
+		}
 		if m.view == viewDetail {
 			return m.updateDetail(msg)
 		}
@@ -380,10 +402,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return newM, cmd
 	}
 	// Non-key messages (e.g. the textinput's cursor blink) are forwarded to the
-	// add screen's input while it's active, so the cursor animates.
+	// add or move screen's input while active, so the cursor animates.
 	if m.view == viewCreate {
 		var cmd tea.Cmd
 		m.create.input, cmd = m.create.input.Update(msg)
+		return m, cmd
+	}
+	if m.view == viewMove {
+		var cmd tea.Cmd
+		m.move.input, cmd = m.move.input.Update(msg)
 		return m, cmd
 	}
 	return m, nil
@@ -428,6 +455,8 @@ func (m *model) View() string {
 	switch m.view {
 	case viewDetail:
 		raw = m.viewDetailRender()
+	case viewMove:
+		raw = m.viewMoveRender()
 	case viewCreate:
 		raw = m.viewCreateRender()
 	case viewHelp:

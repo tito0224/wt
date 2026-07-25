@@ -94,6 +94,8 @@ func (m *model) updateNormal(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if _, ok := m.selected(); ok {
 				m.view = viewDetail
 			}
+		case "m":
+			return m.runAction("move")
 		case "y":
 			return m.runAction("yank")
 		case "r":

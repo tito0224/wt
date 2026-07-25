@@ -39,7 +39,7 @@ func (m *model) keyBarHints(v view, hasPR, dirty bool) []keyHint {
 	} else {
 		hints = append(hints, keyHint{"⇥", "back", true})
 	}
-	hints = append(hints, keyHint{"r", "remove", true})
+	hints = append(hints, keyHint{"m", "move", true}, keyHint{"r", "remove", true})
 	if v == viewList {
 		hints = append(hints, keyHint{"/", "search", true})
 	}

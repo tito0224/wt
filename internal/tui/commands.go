@@ -170,6 +170,8 @@ func (m *model) runAction(id string) (tea.Model, tea.Cmd) {
 		}
 		m.setMsg("no uncommitted changes to diff")
 		return m, nil
+	case "move":
+		return m.enterMove(wt)
 	case "cd":
 		m.resultAction = id
 		m.resultWT = wt // value copy; safe to read after the program exits

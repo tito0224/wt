@@ -570,11 +570,16 @@ func DeleteBranch(dir, branch string, force bool) error {
 // Add creates a new worktree at path checked out to a newly created branch,
 // based on the given ref. When base is empty, git uses the current HEAD. The
 // parent directory of path is created if necessary.
+//
+// --no-track prevents the new branch from inheriting the base ref's upstream
+// (e.g. origin/master), which would make the first `git push` fail with
+// "upstream branch does not match your current branch" instead of showing
+// the familiar "no upstream" suggestion.
 func Add(dir, path, branch, base string) error {
 	if err := ensureParent(path); err != nil {
 		return err
 	}
-	args := []string{"worktree", "add", "-b", branch, path}
+	args := []string{"worktree", "add", "--no-track", "-b", branch, path}
 	if base != "" {
 		args = append(args, base)
 	}
@@ -601,6 +606,13 @@ func AddTracking(dir, path, branch, remoteRef string) error {
 		return err
 	}
 	_, err := run(dir, "worktree", "add", "--track", "-b", branch, path, remoteRef)
+	return err
+}
+
+// Move relocates a linked worktree to a new path. The source and destination
+// may be absolute or relative (resolved from dir).
+func Move(dir, srcPath, dstPath string) error {
+	_, err := run(dir, "worktree", "move", srcPath, dstPath)
 	return err
 }
 
