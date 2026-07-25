@@ -77,7 +77,10 @@ naming. The branch name and the on-disk location follow different rules: the
 branch keeps its full name, slashes and all (e.g. `jl/foo`), while the
 worktree directory is always a single flat folder derived from the name with
 slashes replaced by `-` (branch `feat/x` lives in `.../feat-x`, never a
-nested `feat/x/`).
+nested `feat/x/`). With a `branch_prefix` configured, the prefix is stripped
+from the directory name (branch `jl/foo` lives in `.../foo`), and typing a
+name that already carries the prefix won't double it — `wt add foo` and
+`wt add jl/foo` are equivalent.
 
 Configuration is layered, later sources overriding earlier ones:
 

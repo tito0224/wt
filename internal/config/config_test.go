@@ -19,6 +19,13 @@ func TestBranchName(t *testing.T) {
 		{"empty prefix passes through", Create{}, "feature", "feature"},
 		{"default separator", Create{BranchPrefix: "jl"}, "feature", "jl/feature"},
 		{"custom separator", Create{BranchPrefix: "jl", BranchSeparator: "-"}, "feature", "jl-feature"},
+		// A name typed with the prefix must not be prefixed again.
+		{"already prefixed", Create{BranchPrefix: "jl"}, "jl/feature", "jl/feature"},
+		{"already prefixed custom sep", Create{BranchPrefix: "jl", BranchSeparator: "-"}, "jl-feature", "jl-feature"},
+		// Only prefix+separator strips; a bare prefix is an ordinary name, and
+		// a different separator is not a prefix match.
+		{"bare prefix is a name", Create{BranchPrefix: "jl"}, "jl", "jl/jl"},
+		{"prefix with wrong separator", Create{BranchPrefix: "jl", BranchSeparator: "-"}, "jl/feature", "jl-jl/feature"},
 	}
 	for _, tt := range tests {
 		if got := tt.create.BranchName(tt.in); got != tt.want {
@@ -120,6 +127,28 @@ func TestWorktreeDirFlattensName(t *testing.T) {
 		if got := c.WorktreeDir(repoRoot, degenerate); got != parent {
 			t.Errorf("degenerate name %q: WorktreeDir = %q, want parent dir %q", degenerate, got, parent)
 		}
+	}
+}
+
+// TestWorktreeDirStripsBranchPrefix pins the typed-name equivalence: with a
+// prefix configured, "foo" and "jl/foo" resolve to the same directory, and a
+// prefixed branch gets a short dir name ("foo", not "jl-foo").
+func TestWorktreeDirStripsBranchPrefix(t *testing.T) {
+	repoRoot := filepath.Join(string(filepath.Separator), "home", "me", "src", "myrepo")
+	parent := filepath.Join(string(filepath.Separator), "home", "me", "src", "myrepo-worktrees")
+	c := Create{BranchPrefix: "jl"}
+
+	want := filepath.Join(parent, "foo")
+	if got := c.WorktreeDir(repoRoot, "foo"); got != want {
+		t.Errorf("bare name: WorktreeDir = %q, want %q", got, want)
+	}
+	if got := c.WorktreeDir(repoRoot, "jl/foo"); got != want {
+		t.Errorf("prefixed name: WorktreeDir = %q, want %q (same as bare)", got, want)
+	}
+	// A name that strips to nothing is degenerate: parent-dir fallback
+	// (display-only; ops rejects it before creation).
+	if got := c.WorktreeDir(repoRoot, "jl/"); got != parent {
+		t.Errorf("prefix-only name: WorktreeDir = %q, want parent %q", got, parent)
 	}
 }
 

@@ -136,6 +136,34 @@ func TestAddWorktreeUsesRepoConfig(t *testing.T) {
 	}
 }
 
+// TestAddWorktreePrefixedNameNotDoubled reproduces the reported bug: typing
+// the branch name with its configured prefix must not prefix it again, and
+// must produce the same worktree directory as typing the bare name would.
+func TestAddWorktreePrefixedNameNotDoubled(t *testing.T) {
+	repo := newTestRepo(t)
+	cfg := "[create]\nbranch_prefix = \"tst\"\n"
+	if err := os.WriteFile(filepath.Join(repo, ".wt.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	branch, path, err := AddWorktree(repo, "tst/feat", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "tst/feat" {
+		t.Errorf("branch = %q, want tst/feat (prefix not doubled)", branch)
+	}
+	if got := filepath.Base(path); got != "feat" {
+		t.Errorf("path base = %q, want feat (same dir as typing the bare name)", got)
+	}
+
+	// A name that is only the prefix+separator strips to nothing and is
+	// rejected before any branch or directory is created.
+	if _, _, err := AddWorktree(repo, "tst/", "", "", nil); err == nil {
+		t.Error("AddWorktree(\"tst/\") succeeded, want error")
+	}
+}
+
 func TestAddWorktreeBaseOverride(t *testing.T) {
 	repo := newTestRepo(t)
 	// A base branch one commit ahead of main.
