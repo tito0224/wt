@@ -124,7 +124,9 @@ func (m *model) recomputeCreate() {
 			rows = append(rows, createRow{branch: br})
 			continue
 		}
-		if idx, _, ok := fuzzyMatch(strings.ToLower(br.Name), q); ok {
+		// Match against the full display name so "origin/foo" is findable by
+		// typing either the remote or the branch part.
+		if idx, _, ok := fuzzyMatch(strings.ToLower(br.FullName()), q); ok {
 			rows = append(rows, createRow{branch: br, matched: idx})
 		}
 	}
@@ -149,13 +151,16 @@ func (m *model) doCreateSelected() (tea.Model, tea.Cmd) {
 		m.setErr(fmt.Sprintf("branch %s is already checked out", row.branch.Name))
 		return m, nil
 	}
+	if row.branch.IsRemote() {
+		return m.doAddRemote(row.branch)
+	}
 	return m.doAddExisting(row.branch.Name)
 }
 
 func (m *model) viewCreateRender() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("add worktree") + "\n\n")
-	b.WriteString(helpStyle.Render("name a new branch, or pick an existing one") + "\n")
+	b.WriteString(helpStyle.Render("name a new branch, or pick an existing or remote one") + "\n")
 	b.WriteString(m.create.input.View() + "\n\n")
 
 	// Show a window of rows around the cursor so a long branch list can't push
@@ -221,6 +226,14 @@ func (m *model) renderCreateRow(row createRow, selected bool) string {
 	if br.InUse() {
 		// Dimmed and non-selectable regardless of cursor position.
 		return "  " + pathStyle.Render(br.Name+"  (in use)")
+	}
+	// Remote-tracking branches get a dim hint; picking one creates a local
+	// branch tracking it.
+	if br.IsRemote() {
+		if selected {
+			return selectedStyle.Render("> " + br.FullName() + "  (remote)")
+		}
+		return "  " + highlight(br.FullName(), row.matched) + pathStyle.Render("  (remote)")
 	}
 	if selected {
 		return selectedStyle.Render("> " + br.Name)

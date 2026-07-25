@@ -221,6 +221,36 @@ func TestAddExistingBranchFlattensSlashes(t *testing.T) {
 	}
 }
 
+// TestAddRemoteBranch pins the tracking-add contract: a worktree on a new
+// local branch named after the remote one, tracking it, in a directory
+// derived by the usual bare-name rules.
+func TestAddRemoteBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	// A bare clone registered as origin, with a branch only it has.
+	bare := filepath.Join(t.TempDir(), "origin.git")
+	mustGit(t, repo, "clone", "--bare", repo, bare)
+	mustGit(t, repo, "remote", "add", "origin", bare)
+	mustGit(t, repo, "branch", "feat/remote")
+	mustGit(t, repo, "push", "-q", "origin", "feat/remote")
+	mustGit(t, repo, "branch", "-D", "feat/remote")
+	mustGit(t, repo, "fetch", "-q", "origin")
+
+	path, err := AddRemoteBranch(repo, "origin", "feat/remote", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Directory follows the flattening rules, same as any other add.
+	if got := filepath.Base(path); got != "feat-remote" {
+		t.Errorf("path base = %q, want feat-remote", got)
+	}
+	if got := mustGit(t, path, "rev-parse", "--abbrev-ref", "HEAD"); got != "feat/remote" {
+		t.Errorf("checked-out branch = %q, want feat/remote", got)
+	}
+	if got := mustGit(t, path, "rev-parse", "--abbrev-ref", "@{upstream}"); got != "origin/feat/remote" {
+		t.Errorf("upstream = %q, want origin/feat/remote", got)
+	}
+}
+
 // TestPostCreateHooksRun pins the hook contract: commands run in order, via a
 // shell, inside the new worktree, with the WT_* context variables set.
 func TestPostCreateHooksRun(t *testing.T) {

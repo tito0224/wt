@@ -135,6 +135,30 @@ func AddExistingBranch(repoRoot, branch string, hookOut io.Writer) (path string,
 	return path, runCreateHooks(repoRoot, path, branch, cfg.Create.Run, hookOut)
 }
 
+// AddRemoteBranch creates a worktree for a remote-tracking branch: a new
+// local branch named after it (e.g. "feat/x" for origin's "feat/x"), set up
+// to track the remote branch, checked out into a directory derived exactly as
+// for the other add flows (bare name, prefix stripped, flattened). git itself
+// refuses when a local branch of that name already exists — callers normally
+// only offer remote branches without a local counterpart.
+//
+// Post-create hooks run exactly as for AddWorktree: on hook failure the
+// returned path is still valid and err is a *HookFailedError.
+func AddRemoteBranch(repoRoot, remote, branch string, hookOut io.Writer) (path string, err error) {
+	cfg, err := config.Load(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	if _, err := config.DirName(cfg.Create.BareName(branch)); err != nil {
+		return "", err
+	}
+	path = cfg.Create.WorktreeDir(repoRoot, branch)
+	if err := git.AddTracking(repoRoot, path, branch, remote+"/"+branch); err != nil {
+		return "", err
+	}
+	return path, runCreateHooks(repoRoot, path, branch, cfg.Create.Run, hookOut)
+}
+
 // RemoveOptions controls a worktree removal.
 type RemoveOptions struct {
 	// Force discards uncommitted changes when removing the worktree.

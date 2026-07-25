@@ -129,7 +129,11 @@ func newAddCmd() *cobra.Command {
 		Long: "Add a new worktree and branch for <name>.\n\n" +
 			"Defaults for the base branch, target directory, and branch naming " +
 			"come from the wt config file (see `wt config path`), and can be " +
-			"overridden per-invocation with flags.",
+			"overridden per-invocation with flags.\n\n" +
+			"When <name> matches a remote-tracking branch with no local " +
+			"counterpart (e.g. `wt add origin/foo`), a local branch tracking " +
+			"it is created instead of a new branch. Run `git fetch` first if " +
+			"the branch is not known locally yet.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -145,7 +149,15 @@ func newAddCmd() *cobra.Command {
 			// Hook output streams to stderr: with the shell wrapper, stdout is
 			// captured by $(...) until wt exits, so stderr is the only way to
 			// show hook progress live.
-			branch, path, err := ops.AddWorktree(top, name, base, dir, os.Stderr)
+			var branch, path string
+			// Remote DWIM only without --base: an explicit base means "create
+			// a new branch from <base>", which a tracking add can't honor.
+			if rb, ok := matchRemoteBranch(top, name); ok && base == "" {
+				branch = rb.Name
+				path, err = ops.AddRemoteBranch(top, rb.Remote, rb.Name, os.Stderr)
+			} else {
+				branch, path, err = ops.AddWorktree(top, name, base, dir, os.Stderr)
+			}
 			var hookErr *ops.HookFailedError
 			if errors.As(err, &hookErr) {
 				// The worktree exists; report the partial success, then the

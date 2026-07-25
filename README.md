@@ -57,6 +57,7 @@ wt                      # interactive picker (see keys below)
 wt list                 # print worktrees + status (current marked with *)
 wt add <name>           # add a new worktree + branch
 wt add <name> --tab     # ...and open a new terminal tab in it
+wt add origin/foo       # worktree on a local branch tracking origin/foo
 wt open <branch|path>   # print the worktree path (wrapper cd's into it)
 wt open <branch> --tab  # open a new terminal tab there instead
 wt status [branch]      # detailed status for one or all worktrees
@@ -176,11 +177,14 @@ installed and the repo is on GitHub, its pull request (number, state, URL).
 These load in the background and are cached for the session; press `R` to
 refresh the list and statuses.
 
-The add screen (`a`) lets you create a worktree for a new branch or an existing
-one: type a name to filter the list of local branches shown below the input.
-The top row always creates a new branch with the configured name; use `↑`/`↓`
-to pick an existing branch instead. Branches already checked out in another
-worktree are shown dimmed and can't be selected.
+The add screen (`a`) lets you create a worktree for a new branch, an existing
+one, or a remote one: type a name to filter the list of branches shown below
+the input. The top row always creates a new branch with the configured name;
+use `↑`/`↓` to pick an existing branch instead. Branches already checked out
+in another worktree are shown dimmed and can't be selected. Remote-tracking
+branches without a local counterpart appear as `origin/foo  (remote)`;
+picking one creates a local branch tracking it. The list reflects what git
+already knows — run `git fetch` to pick up new remote branches.
 
 ## Terminal selection
 
