@@ -12,7 +12,14 @@ permissions:
   models: read # GitHub Models inference for drafting release notes
 
 jobs:
+  # The release gate is the CI workflow itself (both OS test legs + lint),
+  # not a re-declared subset — a tag only becomes a release if the exact
+  # checks that guard master pass on it.
+  checks:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -24,9 +31,6 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-
-      - name: Checks (full battery)
-        run: make check
 
       - name: Build artifacts
         run: make dist VERSION="${{ github.ref_name }}"

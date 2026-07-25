@@ -4,6 +4,9 @@ on:
   push:
     branches: [master]
   pull_request:
+  # Callable as a reusable workflow: the release workflow runs this as its
+  # gate, so "release checks" and "CI green" are the same thing by definition.
+  workflow_call:
 
 permissions:
   contents: read
