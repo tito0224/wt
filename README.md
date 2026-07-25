@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/tito0224/wt/actions/workflows/ci.yml/badge.svg)](https://github.com/tito0224/wt/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/tito0224/wt?include_prereleases&sort=semver)](https://github.com/tito0224/wt/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/tito0224/wt)](https://goreportcard.com/report/github.com/tito0224/wt)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/tito0224/wt)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 <img src="docs/demo.gif" alt="wt demo" width="900">
