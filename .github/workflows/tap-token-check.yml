@@ -1,0 +1,34 @@
+name: Tap token check
+
+# Manual sanity check for the TAP_GITHUB_TOKEN secret (used by the release
+# workflow to bump tito0224/homebrew-tap). Clones the tap with the token and
+# performs a dry-run push: this exercises authentication AND write permission
+# without modifying anything. Run it after creating or rotating the token:
+#
+#   gh workflow run "Tap token check" && gh run watch
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify token can push to the tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::error::TAP_GITHUB_TOKEN secret is not set" >&2
+            exit 1
+          fi
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/tito0224/homebrew-tap.git" tap
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "token check (never pushed)"
+          # Dry run: the server authenticates and checks permissions, but no
+          # ref is updated.
+          git push --dry-run origin HEAD
+          echo "token OK: clone + dry-run push succeeded"
