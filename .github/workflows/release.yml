@@ -93,3 +93,26 @@ jobs:
             args+=(--generate-notes)
           fi
           gh release create "$tag" dist/*.tar.gz dist/checksums.txt "${args[@]}"
+
+      - name: Bump Homebrew tap
+        # Regenerates Formula/wt.rb in tito0224/homebrew-tap from this
+        # release's tag + checksums. Needs a fine-grained PAT with write
+        # access to the tap repo (GITHUB_TOKEN is scoped to this repo only);
+        # skips gracefully when the secret is not configured.
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "TAP_GITHUB_TOKEN not set; skipping tap bump" >&2
+            exit 0
+          fi
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/tito0224/homebrew-tap.git" /tmp/tap
+          mkdir -p /tmp/tap/Formula
+          scripts/generate-formula.sh "$TAG" dist/checksums.txt > /tmp/tap/Formula/wt.rb
+          cd /tmp/tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/wt.rb
+          git commit -m "wt ${TAG}"
+          git push
